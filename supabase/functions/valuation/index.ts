@@ -252,7 +252,7 @@ function calculateStartValue(mode: BasisMode, data: any): number {
     });
     
     const avgBuybackPerShare = buybackPerShareValues.length > 0
-      ? buybackPerShareValues.reduce((a, b) => a + b, 0) / buybackPerShareValues.length
+      ? buybackPerShareValues.reduce((a: number, b: number) => a + b, 0) / buybackPerShareValues.length
       : 0;
     
     return Math.max(0, dividendPerShare + avgBuybackPerShare);

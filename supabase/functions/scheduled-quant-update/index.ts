@@ -127,12 +127,13 @@ serve(async (req) => {
         console.error(`[${jobName}] Fatal error:`, error);
         
         if (jobId) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
           await supabaseClient
             .from('scheduled_job_logs')
             .update({
               status: 'failed',
               completed_at: new Date().toISOString(),
-              error_message: error.message || String(error),
+              error_message: errorMessage,
               markets_processed: stats.marketsProcessed,
               stocks_full_analyzed: stats.stocksFullAnalyzed,
               stocks_price_updated: stats.stocksPriceUpdated,
@@ -169,8 +170,9 @@ serve(async (req) => {
     );
   } catch (error) {
     console.error('Error starting scheduled quant update:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: errorMessage }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 500

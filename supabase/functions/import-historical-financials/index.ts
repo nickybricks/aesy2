@@ -599,7 +599,8 @@ serve(async (req) => {
 
       } catch (error) {
         console.error(`  ❌ Error processing ${stock.symbol}: ${error}`)
-        errors.push(`${stock.symbol}: ${error.message || String(error)}`)
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        errors.push(`${stock.symbol}: ${errorMessage}`)
       }
     }
 
@@ -625,10 +626,11 @@ serve(async (req) => {
     )
   } catch (error) {
     console.error('Error in import-historical-financials:', error)
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return new Response(
       JSON.stringify({
         success: false,
-        error: error.message || String(error),
+        error: errorMessage,
       }),
       {
         status: 500,

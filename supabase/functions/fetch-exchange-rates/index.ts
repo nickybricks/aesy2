@@ -74,7 +74,6 @@ serve(async (req) => {
           updates.push({
             base_currency: 'USD',
             target_currency: currency,
-            valid_date: today,
             rate: Number(rate),
             fetched_at: nowIso,
             is_fallback: false,
@@ -93,7 +92,6 @@ serve(async (req) => {
           updates.push({
             base_currency: 'EUR',
             target_currency: currency,
-            valid_date: today,
             rate: Number(rate),
             fetched_at: nowIso,
             is_fallback: false,

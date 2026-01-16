@@ -144,7 +144,8 @@ async function getHistoricalFxRate(
       return fxData.historical[0].close;
     }
   } catch (err) {
-    console.warn(`Failed to fetch historical FX rate: ${err.message}`);
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.warn(`Failed to fetch historical FX rate: ${errorMessage}`);
   }
   
   // 3. Use 1.0 as fallback (same currency or error)
@@ -178,7 +179,8 @@ async function getQuarterEndPrice(
     prices.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
     return { price: prices[0].close, priceDate: prices[0].date };
   } catch (err) {
-    console.error(`Error fetching quarter-end price: ${err.message}`);
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error(`Error fetching quarter-end price: ${errorMessage}`);
     return { price: null, priceDate: null };
   }
 }
