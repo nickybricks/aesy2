@@ -125,7 +125,8 @@ serve(async (req) => {
       }
     } catch (error) {
       console.error('Error fetching US rates:', error)
-      errors.push(`US: ${error.message}`)
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      errors.push(`US: ${errorMessage}`)
       errorCount++
     }
 
@@ -186,7 +187,8 @@ serve(async (req) => {
         }
       } catch (error) {
         console.error(`Error fetching ${countryCode} rates:`, error)
-        errors.push(`${countryCode}: ${error.message}`)
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        errors.push(`${countryCode}: ${errorMessage}`)
         errorCount++
       }
     }
@@ -212,10 +214,11 @@ serve(async (req) => {
     )
   } catch (error) {
     console.error('Error in fetch-risk-free-rates:', error)
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return new Response(
       JSON.stringify({ 
         success: false,
-        error: error.message 
+        error: errorMessage 
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

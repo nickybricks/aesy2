@@ -87,6 +87,9 @@ interface FinancialStatement {
   weighted_avg_shares_diluted: number | null;
   full_time_employees: number | null;
   tax_rate: number | null;
+  // Allow dynamic string indexing for currency-suffixed fields
+  // deno-lint-ignore no-explicit-any
+  [key: string]: any;
 }
 
 // Helper function to calculate TTM (Trailing Twelve Months) values by summing last 4 quarters

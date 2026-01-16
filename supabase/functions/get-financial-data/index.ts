@@ -124,15 +124,16 @@ serve(async (req) => {
     }
     
     // Calculate metadata
+    const dataArray = data as any[];
     const meta = {
-      count: data?.length || 0,
-      avgQualityScore: data && data.length > 0
-        ? Math.round(data.reduce((acc, item) => acc + (item.data_quality_score || 0), 0) / data.length)
+      count: dataArray?.length || 0,
+      avgQualityScore: dataArray && dataArray.length > 0
+        ? Math.round(dataArray.reduce((acc: number, item: any) => acc + (item.data_quality_score || 0), 0) / dataArray.length)
         : 0,
-      currency: data && data.length > 0 ? data[0].reported_currency : null,
-      dateRange: data && data.length > 0 ? {
-        from: data[data.length - 1].fiscal_date,
-        to: data[0].fiscal_date
+      currency: dataArray && dataArray.length > 0 ? dataArray[0].reported_currency : null,
+      dateRange: dataArray && dataArray.length > 0 ? {
+        from: dataArray[dataArray.length - 1].fiscal_date,
+        to: dataArray[0].fiscal_date
       } : null
     };
     

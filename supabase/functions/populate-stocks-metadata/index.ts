@@ -359,7 +359,8 @@ serve(async (req) => {
             }
           }
         } catch (error) {
-          console.warn(`Could not fetch quote for ${symbol}:`, error.message)
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.warn(`Could not fetch quote for ${symbol}:`, errorMessage)
         }
         
         // 3. Fetch dividend data
@@ -377,7 +378,8 @@ serve(async (req) => {
             }
           }
         } catch (error) {
-          console.warn(`Could not fetch dividend for ${symbol}:`, error.message)
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.warn(`Could not fetch dividend for ${symbol}:`, errorMessage)
         }
         
         // Translate sector and industry
@@ -424,7 +426,8 @@ serve(async (req) => {
         }
         
       } catch (error) {
-        console.error(`Error processing ${symbol}:`, error.message)
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`Error processing ${symbol}:`, errorMessage)
         totalErrors++
       }
     }
@@ -450,7 +453,8 @@ serve(async (req) => {
           console.log(`Successfully upserted ${totalInserted} stocks`)
         }
       } catch (error) {
-        console.error(`Database exception:`, error.message)
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`Database exception:`, errorMessage)
         totalErrors += stockData.length
       }
     }
@@ -493,8 +497,9 @@ serve(async (req) => {
     )
   } catch (error) {
     console.error('Import failed:', error)
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: errorMessage }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 500,
