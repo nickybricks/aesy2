@@ -2981,6 +2981,57 @@ export type Database = {
         }
         Relationships: []
       }
+      scheduled_job_logs: {
+        Row: {
+          completed_at: string | null
+          created_at: string | null
+          error_message: string | null
+          id: string
+          job_name: string
+          markets_processed: Json | null
+          started_at: string | null
+          status: string | null
+          stocks_failed: number | null
+          stocks_full_analyzed: number | null
+          stocks_price_updated: number | null
+          stocks_skipped: number | null
+          total_api_calls: number | null
+          trigger_source: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          job_name: string
+          markets_processed?: Json | null
+          started_at?: string | null
+          status?: string | null
+          stocks_failed?: number | null
+          stocks_full_analyzed?: number | null
+          stocks_price_updated?: number | null
+          stocks_skipped?: number | null
+          total_api_calls?: number | null
+          trigger_source?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          job_name?: string
+          markets_processed?: Json | null
+          started_at?: string | null
+          status?: string | null
+          stocks_failed?: number | null
+          stocks_full_analyzed?: number | null
+          stocks_price_updated?: number | null
+          stocks_skipped?: number | null
+          total_api_calls?: number | null
+          trigger_source?: string | null
+        }
+        Relationships: []
+      }
       stock_analysis_cache: {
         Row: {
           analysis_result: Json

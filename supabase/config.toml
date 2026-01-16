@@ -1,1 +1,76 @@
 project_id = "slpruxtkowlxawssqyup"
+
+[functions.bulk-populate-cache]
+verify_jwt = false
+
+[functions.calculate-financial-strength-scores]
+verify_jwt = false
+
+[functions.calculate-precomputed-metrics]
+verify_jwt = false
+
+[functions.calculate-profitability-scores]
+verify_jwt = false
+
+[functions.calculate-valuation-scores]
+verify_jwt = false
+
+[functions.daily-price-update]
+verify_jwt = false
+
+[functions.daily-stocks-update]
+verify_jwt = false
+
+[functions.delete-financial-statements]
+verify_jwt = false
+
+[functions.fetch-exchange-rates]
+verify_jwt = false
+
+[functions.fetch-historical-exchange-rates-eur]
+verify_jwt = false
+
+[functions.fetch-historical-exchange-rates-usd]
+verify_jwt = false
+
+[functions.fetch-market-risk-premium]
+verify_jwt = false
+
+[functions.fetch-news]
+verify_jwt = false
+
+[functions.fetch-risk-free-rates]
+verify_jwt = false
+
+[functions.get-exchange-rate]
+verify_jwt = false
+
+[functions.get-financial-data]
+verify_jwt = false
+
+[functions.get-fmp-key]
+verify_jwt = false
+
+[functions.import-historical-financials]
+verify_jwt = false
+
+[functions.perplexity-news]
+verify_jwt = false
+
+[functions.populate-company-profile]
+verify_jwt = false
+
+[functions.populate-financial-data]
+verify_jwt = false
+
+[functions.populate-stocks-metadata]
+verify_jwt = false
+
+[functions.update-prices]
+verify_jwt = false
+
+[functions.valuation]
+verify_jwt = false
+
+[functions.scheduled-quant-update]
+verify_jwt = false
