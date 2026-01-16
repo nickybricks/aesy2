@@ -65,8 +65,8 @@ const AppHeader: React.FC = () => {
               {t('nav.analyzer')}
             </Button>
           </Link>
-          <Link to="/quant-analyzer">
-            <Button variant={isActive("/quant-analyzer") ? "secondary" : "ghost"} size="sm">
+          <Link to="/quant">
+            <Button variant={isActive("/quant") ? "secondary" : "ghost"} size="sm">
               {t('nav.boersenAnalyzer')}
             </Button>
           </Link>
@@ -195,7 +195,7 @@ const AppHeader: React.FC = () => {
 
                 <Button
                   variant="ghost"
-                  onClick={() => handleMobileNavigation("/quant-analyzer")}
+                  onClick={() => handleMobileNavigation("/quant")}
                   className="w-full justify-start text-lg h-14"
                 >
                   <BarChart3 className="mr-3 h-5 w-5" />
