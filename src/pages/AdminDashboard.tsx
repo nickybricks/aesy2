@@ -8,10 +8,12 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { Users, Activity, TrendingUp } from 'lucide-react';
+import { Users, Activity, TrendingUp, Clock } from 'lucide-react';
 import ImpersonationBanner from '@/components/ImpersonationBanner';
 import { Shell, ShellHeader, ShellTitle, ShellDescription, ShellContent } from '@/components/layout/Shell';
+import CronJobsOverview from '@/components/admin/CronJobsOverview';
 
 interface Customer {
   id: string;
@@ -176,149 +178,168 @@ const AdminDashboard: React.FC = () => {
         </ShellHeader>
 
         <ShellContent>
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">Gesamt Benutzer</CardTitle>
-                <div className="p-2 rounded-2xl bg-primary/10">
-                  <Users className="h-4 w-4 text-primary" />
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.totalUsers}</div>
-              </CardContent>
-            </Card>
+          <Tabs defaultValue="users" className="space-y-6">
+            <TabsList>
+              <TabsTrigger value="users" className="gap-2">
+                <Users className="h-4 w-4" />
+                Benutzer
+              </TabsTrigger>
+              <TabsTrigger value="cron" className="gap-2">
+                <Clock className="h-4 w-4" />
+                Cron Jobs
+              </TabsTrigger>
+            </TabsList>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">Watchlists</CardTitle>
-                <div className="p-2 rounded-2xl bg-success/10">
-                  <TrendingUp className="h-4 w-4 text-success" />
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.totalWatchlists}</div>
-              </CardContent>
-            </Card>
+            <TabsContent value="users" className="space-y-6">
+              {/* Stats Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-sm font-medium">Gesamt Benutzer</CardTitle>
+                    <div className="p-2 rounded-2xl bg-primary/10">
+                      <Users className="h-4 w-4 text-primary" />
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{stats.totalUsers}</div>
+                  </CardContent>
+                </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">Analysen</CardTitle>
-                <div className="p-2 rounded-2xl bg-info/10">
-                  <Activity className="h-4 w-4 text-info" />
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.totalAnalyses}</div>
-              </CardContent>
-            </Card>
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-sm font-medium">Watchlists</CardTitle>
+                    <div className="p-2 rounded-2xl bg-success/10">
+                      <TrendingUp className="h-4 w-4 text-success" />
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{stats.totalWatchlists}</div>
+                  </CardContent>
+                </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">Heute aktiv</CardTitle>
-                <div className="p-2 rounded-2xl bg-warning/10">
-                  <Activity className="h-4 w-4 text-warning" />
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.activeToday}</div>
-              </CardContent>
-            </Card>
-          </div>
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-sm font-medium">Analysen</CardTitle>
+                    <div className="p-2 rounded-2xl bg-info/10">
+                      <Activity className="h-4 w-4 text-info" />
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{stats.totalAnalyses}</div>
+                  </CardContent>
+                </Card>
 
-          {/* User Management */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Benutzer verwalten</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex gap-4 mb-6">
-                <Input
-                  placeholder="Suche nach E-Mail oder Name..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="max-w-sm"
-                />
-                <Select value={selectedRole} onValueChange={setSelectedRole}>
-                  <SelectTrigger className="w-48">
-                    <SelectValue placeholder="Rolle filtern" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Alle Rollen</SelectItem>
-                    <SelectItem value="customer">Kunde</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="super_admin">Super Admin</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-sm font-medium">Heute aktiv</CardTitle>
+                    <div className="p-2 rounded-2xl bg-warning/10">
+                      <Activity className="h-4 w-4 text-warning" />
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{stats.activeToday}</div>
+                  </CardContent>
+                </Card>
               </div>
 
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>E-Mail</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Rolle</TableHead>
-                    <TableHead>Registriert</TableHead>
-                    <TableHead>Watchlists</TableHead>
-                    <TableHead>Analysen</TableHead>
-                    <TableHead>Aktionen</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center">Lädt...</TableCell>
-                    </TableRow>
-                  ) : filteredCustomers.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center">Keine Benutzer gefunden</TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredCustomers.map((customer) => (
-                      <TableRow key={customer.id}>
-                        <TableCell>{customer.email}</TableCell>
-                        <TableCell>{customer.display_name || '-'}</TableCell>
-                        <TableCell>
-                          <Select
-                            value={customer.role}
-                            onValueChange={(value: 'customer' | 'admin' | 'super_admin') => handleRoleChange(customer.id, value)}
-                            disabled={customer.id === user?.id}
-                          >
-                            <SelectTrigger className="w-32">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="customer">Kunde</SelectItem>
-                              <SelectItem value="admin">Admin</SelectItem>
-                              {hasRole('super_admin') && (
-                                <SelectItem value="super_admin">Super Admin</SelectItem>
-                              )}
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell>
-                          {new Date(customer.created_at).toLocaleDateString('de-DE')}
-                        </TableCell>
-                        <TableCell>{customer.watchlists_count}</TableCell>
-                        <TableCell>{customer.analyses_count}</TableCell>
-                        <TableCell>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleImpersonate(customer)}
-                            disabled={customer.id === user?.id}
-                          >
-                            Anmelden als
-                          </Button>
-                        </TableCell>
+              {/* User Management */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Benutzer verwalten</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex gap-4 mb-6">
+                    <Input
+                      placeholder="Suche nach E-Mail oder Name..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="max-w-sm"
+                    />
+                    <Select value={selectedRole} onValueChange={setSelectedRole}>
+                      <SelectTrigger className="w-48">
+                        <SelectValue placeholder="Rolle filtern" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Alle Rollen</SelectItem>
+                        <SelectItem value="customer">Kunde</SelectItem>
+                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="super_admin">Super Admin</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>E-Mail</TableHead>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Rolle</TableHead>
+                        <TableHead>Registriert</TableHead>
+                        <TableHead>Watchlists</TableHead>
+                        <TableHead>Analysen</TableHead>
+                        <TableHead>Aktionen</TableHead>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+                    </TableHeader>
+                    <TableBody>
+                      {loading ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center">Lädt...</TableCell>
+                        </TableRow>
+                      ) : filteredCustomers.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center">Keine Benutzer gefunden</TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredCustomers.map((customer) => (
+                          <TableRow key={customer.id}>
+                            <TableCell>{customer.email}</TableCell>
+                            <TableCell>{customer.display_name || '-'}</TableCell>
+                            <TableCell>
+                              <Select
+                                value={customer.role}
+                                onValueChange={(value: 'customer' | 'admin' | 'super_admin') => handleRoleChange(customer.id, value)}
+                                disabled={customer.id === user?.id}
+                              >
+                                <SelectTrigger className="w-32">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="customer">Kunde</SelectItem>
+                                  <SelectItem value="admin">Admin</SelectItem>
+                                  {hasRole('super_admin') && (
+                                    <SelectItem value="super_admin">Super Admin</SelectItem>
+                                  )}
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+                            <TableCell>
+                              {new Date(customer.created_at).toLocaleDateString('de-DE')}
+                            </TableCell>
+                            <TableCell>{customer.watchlists_count}</TableCell>
+                            <TableCell>{customer.analyses_count}</TableCell>
+                            <TableCell>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleImpersonate(customer)}
+                                disabled={customer.id === user?.id}
+                              >
+                                Anmelden als
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="cron">
+              <CronJobsOverview />
+            </TabsContent>
+          </Tabs>
         </ShellContent>
       </Shell>
     </main>
