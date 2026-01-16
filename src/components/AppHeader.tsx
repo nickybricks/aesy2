@@ -65,17 +65,11 @@ const AppHeader: React.FC = () => {
               {t('nav.analyzer')}
             </Button>
           </Link>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled
-            className="relative opacity-50"
-          >
-            {t('nav.boersenAnalyzer')}
-            <Badge variant="secondary" className="ml-2 text-[10px] px-1.5 py-0">
-              {t('common.soon')}
-            </Badge>
-          </Button>
+          <Link to="/quant-analyzer">
+            <Button variant={isActive("/quant-analyzer") ? "secondary" : "ghost"} size="sm">
+              {t('nav.boersenAnalyzer')}
+            </Button>
+          </Link>
           <Button
             variant="ghost"
             size="sm"
@@ -199,12 +193,13 @@ const AppHeader: React.FC = () => {
                   {t('nav.analyzer')}
                 </Button>
 
-                <Button variant="ghost" disabled className="w-full justify-start text-lg h-14 opacity-50">
+                <Button
+                  variant="ghost"
+                  onClick={() => handleMobileNavigation("/quant-analyzer")}
+                  className="w-full justify-start text-lg h-14"
+                >
                   <BarChart3 className="mr-3 h-5 w-5" />
                   {t('nav.boersenAnalyzer')}
-                  <Badge variant="secondary" className="ml-auto">
-                    {t('common.soon')}
-                  </Badge>
                 </Button>
 
                 <Button variant="ghost" disabled className="w-full justify-start text-lg h-14 opacity-50">
