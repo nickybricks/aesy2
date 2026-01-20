@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useToast } from '@/hooks/use-toast';
-import { RefreshCw, Clock, CheckCircle2, XCircle, AlertCircle, ChevronDown, Play, Timer, TrendingUp, Database } from 'lucide-react';
+import { RefreshCw, Clock, CheckCircle2, XCircle, AlertCircle, ChevronDown, Play, Timer, TrendingUp, Database, Square, Trash2, AlertTriangle, Ban } from 'lucide-react';
 import { useLanguage } from '@/context/LanguageContext';
 import { formatDistanceToNow, format } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
@@ -44,6 +44,8 @@ const CronJobsOverview: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set());
   const [triggeringJob, setTriggeringJob] = useState<string | null>(null);
+  const [stoppingJob, setStoppingJob] = useState<string | null>(null);
+  const [cleaningUp, setCleaningUp] = useState(false);
 
   const dateLocale = language === 'de' ? de : enUS;
 
@@ -130,6 +132,60 @@ const CronJobsOverview: React.FC = () => {
     setExpandedLogs(newExpanded);
   };
 
+  const stopJob = async (jobId: string, jobName: string) => {
+    setStoppingJob(jobId);
+    try {
+      const { data, error } = await supabase.functions.invoke('stop-job', {
+        body: { jobId }
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: language === 'de' ? "Job gestoppt" : "Job stopped",
+        description: language === 'de' ? `${jobName} wurde abgebrochen` : `${jobName} was cancelled`
+      });
+
+      setTimeout(loadData, 1000);
+    } catch (error) {
+      console.error('Error stopping job:', error);
+      toast({
+        variant: "destructive",
+        title: language === 'de' ? "Fehler" : "Error",
+        description: language === 'de' ? "Job konnte nicht gestoppt werden" : "Failed to stop job"
+      });
+    } finally {
+      setStoppingJob(null);
+    }
+  };
+
+  const cleanupStaleJobs = async () => {
+    setCleaningUp(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('cleanup-stale-jobs');
+
+      if (error) throw error;
+
+      toast({
+        title: language === 'de' ? "Bereinigung abgeschlossen" : "Cleanup complete",
+        description: language === 'de' 
+          ? `${data.cleaned} verwaiste Jobs wurden bereinigt` 
+          : `${data.cleaned} stale jobs were cleaned up`
+      });
+
+      setTimeout(loadData, 1000);
+    } catch (error) {
+      console.error('Error cleaning up jobs:', error);
+      toast({
+        variant: "destructive",
+        title: language === 'de' ? "Fehler" : "Error",
+        description: language === 'de' ? "Bereinigung fehlgeschlagen" : "Cleanup failed"
+      });
+    } finally {
+      setCleaningUp(false);
+    }
+  };
+
   const formatSchedule = (schedule: string): string => {
     const parts = schedule.split(' ');
     if (parts.length !== 5) return schedule;
@@ -171,6 +227,20 @@ const CronJobsOverview: React.FC = () => {
             {language === 'de' ? 'Fehlgeschlagen' : 'Failed'}
           </Badge>
         );
+      case 'stale':
+        return (
+          <Badge className="bg-warning/20 text-warning border-warning/30 gap-1">
+            <AlertTriangle className="h-3 w-3" />
+            {language === 'de' ? 'Verwaist' : 'Stale'}
+          </Badge>
+        );
+      case 'cancelled':
+        return (
+          <Badge className="bg-muted text-muted-foreground border-muted-foreground/30 gap-1">
+            <Ban className="h-3 w-3" />
+            {language === 'de' ? 'Abgebrochen' : 'Cancelled'}
+          </Badge>
+        );
       default:
         return (
           <Badge variant="outline" className="gap-1">
@@ -208,6 +278,7 @@ const CronJobsOverview: React.FC = () => {
   };
 
   const runningJobs = jobLogs.filter(j => j.status === 'running');
+  const staleJobs = jobLogs.filter(j => j.status === 'stale');
   const completedToday = jobLogs.filter(j => 
     j.status === 'completed' && 
     new Date(j.created_at).toDateString() === new Date().toDateString()
@@ -216,6 +287,12 @@ const CronJobsOverview: React.FC = () => {
     j.status === 'failed' && 
     new Date(j.created_at).toDateString() === new Date().toDateString()
   ).length;
+  
+  // Check for orphaned running jobs (running for more than 3 hours)
+  const threeHoursAgo = Date.now() - 3 * 60 * 60 * 1000;
+  const orphanedRunningJobs = runningJobs.filter(j => 
+    new Date(j.started_at).getTime() < threeHoursAgo
+  );
 
   return (
     <div className="space-y-6">
@@ -269,6 +346,50 @@ const CronJobsOverview: React.FC = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Warning for orphaned jobs */}
+      {orphanedRunningJobs.length > 0 && (
+        <Card className="border-warning bg-warning/10">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-warning" />
+              <CardTitle className="text-warning">
+                {language === 'de' 
+                  ? `${orphanedRunningJobs.length} verwaiste Jobs gefunden` 
+                  : `${orphanedRunningJobs.length} orphaned jobs found`}
+              </CardTitle>
+            </div>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={cleanupStaleJobs}
+              disabled={cleaningUp}
+              className="border-warning text-warning hover:bg-warning/20"
+            >
+              {cleaningUp ? (
+                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4 mr-2" />
+              )}
+              {language === 'de' ? 'Bereinigen' : 'Cleanup'}
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              {language === 'de' 
+                ? 'Diese Jobs laufen seit mehr als 3 Stunden und sind wahrscheinlich hängengeblieben. Klicken Sie auf "Bereinigen", um sie als "verwaist" zu markieren.'
+                : 'These jobs have been running for more than 3 hours and are likely stuck. Click "Cleanup" to mark them as stale.'}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {orphanedRunningJobs.map(job => (
+                <Badge key={job.id} variant="outline" className="text-warning border-warning">
+                  {job.job_name} ({getDuration(job.started_at, null)})
+                </Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Scheduled Cron Jobs */}
       <Card>
@@ -397,6 +518,23 @@ const CronJobsOverview: React.FC = () => {
                             {log.stocks_full_analyzed + log.stocks_price_updated} {language === 'de' ? 'Aktien' : 'stocks'}
                           </div>
                         </div>
+                        {log.status === 'running' && (
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              stopJob(log.id, log.job_name);
+                            }}
+                            disabled={stoppingJob === log.id}
+                          >
+                            {stoppingJob === log.id ? (
+                              <RefreshCw className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Square className="h-4 w-4" />
+                            )}
+                          </Button>
+                        )}
                         <ChevronDown className={`h-4 w-4 transition-transform ${expandedLogs.has(log.id) ? 'rotate-180' : ''}`} />
                       </div>
                     </div>
