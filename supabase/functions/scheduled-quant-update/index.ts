@@ -486,6 +486,128 @@ async function getAndCategorizeStocks(
   return { fullAnalysis, priceUpdate, skipped };
 }
 
+// Build criteria object for screener filtering
+function buildCriteria(
+  ratiosData: any, 
+  keyMetricsData: any, 
+  growthData: any, 
+  incomeStatements: any[], 
+  cashFlow: any[]
+) {
+  // Years of profitability (max 10 years)
+  const yearsOfProfitability = incomeStatements
+    .slice(0, 10)
+    .filter((stmt: any) => stmt.netIncome > 0).length;
+  
+  // Profitable last 3 years
+  const profitableYearsLast3 = incomeStatements
+    .slice(0, 3)
+    .filter((stmt: any) => stmt.netIncome > 0).length;
+  
+  // FCF Margin
+  const latestCashFlow = cashFlow[0] || {};
+  const latestIncome = incomeStatements[0] || {};
+  const fcfMargin = latestIncome.revenue > 0 
+    ? (latestCashFlow.freeCashFlow / latestIncome.revenue) * 100 
+    : null;
+  
+  // CAGR calculation helper
+  const calculateCAGR = (values: number[], years: number): number | null => {
+    if (values.length < years + 1) return null;
+    const startValue = values[years];
+    const endValue = values[0];
+    if (startValue <= 0 || endValue <= 0) return null;
+    const cagr = (Math.pow(endValue / startValue, 1 / years) - 1) * 100;
+    return isFinite(cagr) ? cagr : null;
+  };
+  
+  // Revenue CAGR values
+  const revenueValues = incomeStatements
+    .slice(0, 11)
+    .map((s: any) => s.revenue)
+    .filter((v: any) => v > 0);
+  
+  // EPS CAGR values
+  const epsValues = incomeStatements
+    .slice(0, 11)
+    .map((s: any) => s.eps || s.epsdiluted)
+    .filter((v: any) => v > 0);
+
+  const roicValue = ratiosData?.roicTTM 
+    ? ratiosData.roicTTM * 100 
+    : (keyMetricsData?.roicTTM ? keyMetricsData.roicTTM * 100 : null);
+  
+  const roeValue = ratiosData?.returnOnEquityTTM 
+    ? ratiosData.returnOnEquityTTM * 100 
+    : null;
+  
+  const dividendYieldValue = ratiosData?.dividendYieldTTM 
+    ? ratiosData.dividendYieldTTM * 100 
+    : null;
+  
+  const epsGrowthValue = growthData?.epsgrowth 
+    ? growthData.epsgrowth * 100 
+    : null;
+  
+  const revenueGrowthValue = growthData?.revenueGrowth 
+    ? growthData.revenueGrowth * 100 
+    : null;
+  
+  const netMarginValue = ratiosData?.netProfitMarginTTM 
+    ? ratiosData.netProfitMarginTTM * 100 
+    : null;
+  
+  const netDebtToEbitdaValue = keyMetricsData?.netDebtToEBITDATTM ?? null;
+
+  return {
+    yearsOfProfitability: { 
+      value: yearsOfProfitability,
+      pass: yearsOfProfitability >= 8 || (yearsOfProfitability >= 6 && profitableYearsLast3 === 3),
+      profitableYearsLast3: profitableYearsLast3
+    },
+    pe: { 
+      value: ratiosData?.peRatioTTM ?? null,
+      pass: ratiosData?.peRatioTTM != null && ratiosData.peRatioTTM > 0 && ratiosData.peRatioTTM < 20
+    },
+    roic: { 
+      value: roicValue,
+      pass: (roicValue ?? 0) >= 12
+    },
+    roe: { 
+      value: roeValue,
+      pass: (roeValue ?? 0) >= 15
+    },
+    dividendYield: { 
+      value: dividendYieldValue,
+      pass: (dividendYieldValue ?? 0) > 2
+    },
+    epsGrowth: { 
+      value: epsGrowthValue,
+      pass: (epsGrowthValue ?? 0) >= 5,
+      cagr3y: calculateCAGR(epsValues, 3),
+      cagr10y: calculateCAGR(epsValues, 10)
+    },
+    revenueGrowth: { 
+      value: revenueGrowthValue,
+      pass: (revenueGrowthValue ?? 0) >= 5,
+      cagr3y: calculateCAGR(revenueValues, 3),
+      cagr10y: calculateCAGR(revenueValues, 10)
+    },
+    netDebtToEbitda: { 
+      value: netDebtToEbitdaValue,
+      pass: (netDebtToEbitdaValue ?? 999) <= 3
+    },
+    netMargin: { 
+      value: netMarginValue,
+      pass: (netMarginValue ?? 0) >= 10
+    },
+    fcfMargin: { 
+      value: fcfMargin,
+      pass: (fcfMargin ?? 0) >= 10
+    }
+  };
+}
+
 async function performFullAnalysis(
   symbol: string,
   marketId: string,
@@ -524,6 +646,9 @@ async function performFullAnalysis(
     growth: growthData
   });
 
+  // Build criteria object for screener filtering
+  const criteria = buildCriteria(ratiosData, keyMetricsData, growthData, incomeStatements, cashFlow);
+
   // Store raw data
   await supabaseClient
     .from('stock_data_cache')
@@ -537,7 +662,7 @@ async function performFullAnalysis(
       last_updated: new Date().toISOString()
     });
 
-  // Store analysis
+  // Store analysis with criteria object
   await supabaseClient
     .from('stock_analysis_cache')
     .upsert({
@@ -575,7 +700,8 @@ async function performFullAnalysis(
         beta: profileData?.beta,
         description: profileData?.description,
         change: quoteData?.change,
-        changesPercentage: quoteData?.changesPercentage
+        changesPercentage: quoteData?.changesPercentage,
+        criteria  // NEW: criteria object for screener filtering
       },
       last_updated: new Date().toISOString()
     });
