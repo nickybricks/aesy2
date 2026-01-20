@@ -117,6 +117,33 @@ const metricsDefinitions = {
   }
 };
 
+// Calculate buffett score from criteria to ensure consistency
+const calculateBuffettScoreFromCriteria = (criteria: QuantAnalysisResult['criteria']): number => {
+  if (!criteria) return 0;
+  
+  // Count pass status for all 14 criteria
+  const passes = [
+    criteria.yearsOfProfitability?.pass,
+    criteria.pe?.pass,
+    criteria.roic?.pass,
+    criteria.roe?.pass,
+    criteria.dividendYield?.pass,
+    // EPS Growth: 3y, 5y, 10y
+    criteria.epsGrowth?.cagr3y !== null && criteria.epsGrowth?.cagr3y !== undefined && criteria.epsGrowth.cagr3y >= 5,
+    criteria.epsGrowth?.pass, // 5y
+    criteria.epsGrowth?.cagr10y !== null && criteria.epsGrowth?.cagr10y !== undefined && criteria.epsGrowth.cagr10y >= 5,
+    // Revenue Growth: 3y, 5y, 10y
+    criteria.revenueGrowth?.cagr3y !== null && criteria.revenueGrowth?.cagr3y !== undefined && criteria.revenueGrowth.cagr3y >= 5,
+    criteria.revenueGrowth?.pass, // 5y
+    criteria.revenueGrowth?.cagr10y !== null && criteria.revenueGrowth?.cagr10y !== undefined && criteria.revenueGrowth.cagr10y >= 5,
+    criteria.netDebtToEbitda?.pass,
+    criteria.netMargin?.pass,
+    criteria.fcfMargin?.pass
+  ];
+  
+  return passes.filter(Boolean).length;
+};
+
 const BuffettScoreBadge = ({ score }: { score: number }) => {
   // Adjusted thresholds for 14-point scale
   // 10-14 = Kandidat, 6-9 = Beobachten, 0-5 = Vermeiden
@@ -259,8 +286,9 @@ const QuantAnalysisTable: React.FC<QuantAnalysisTableProps> = ({
       // Handle different fields for sorting
       switch (sortField) {
         case 'buffettScore':
-          valueA = a.buffettScore;
-          valueB = b.buffettScore;
+          // Use calculated score instead of stored score for consistency
+          valueA = calculateBuffettScoreFromCriteria(a.criteria);
+          valueB = calculateBuffettScoreFromCriteria(b.criteria);
           break;
         case 'name':
           valueA = a.name;
@@ -335,8 +363,8 @@ const QuantAnalysisTable: React.FC<QuantAnalysisTableProps> = ({
           valueB = b.criteria.fcfMargin?.value || -9999;
           break;
         default:
-          valueA = a.buffettScore;
-          valueB = b.buffettScore;
+          valueA = calculateBuffettScoreFromCriteria(a.criteria);
+          valueB = calculateBuffettScoreFromCriteria(b.criteria);
       }
       
       // String comparison for text fields
@@ -742,10 +770,15 @@ const QuantAnalysisTable: React.FC<QuantAnalysisTableProps> = ({
                   <TableCell className="py-1">{stock.exchange}</TableCell>
                   <TableCell className="py-1">{stock.sector}</TableCell>
                   <TableCell className="py-1">
-                    <div className="flex items-center">
-                      <span className="mr-2">{stock.buffettScore}/14</span>
-                      <BuffettScoreBadge score={stock.buffettScore} />
-                    </div>
+                    {(() => {
+                      const calculatedScore = calculateBuffettScoreFromCriteria(stock.criteria);
+                      return (
+                        <div className="flex items-center">
+                          <span className="mr-2">{calculatedScore}/14</span>
+                          <BuffettScoreBadge score={calculatedScore} />
+                        </div>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell className="py-1">
                     {stock.price?.toFixed(2)} {stock.currency}
