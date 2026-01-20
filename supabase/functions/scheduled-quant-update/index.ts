@@ -15,9 +15,8 @@ const PRICE_UPDATE_BATCH_SIZE = 700;
 // Process one batch per invocation, then self-invoke for next batch
 const BATCH_DELAY_MS = 5000; // 5 seconds between self-invocations
 
-// Cache age thresholds
-const SKIP_IF_NEWER_THAN_HOURS = 4;
-const PRICE_ONLY_IF_NEWER_THAN_DAYS = 7;
+// Cache age thresholds - always update prices, only skip full analysis
+const FULL_ANALYSIS_IF_OLDER_THAN_DAYS = 7;
 
 interface ContinuationState {
   jobId: string;
@@ -497,30 +496,31 @@ async function getAndCategorizeStocks(
   }
 
   const now = Date.now();
-  const skipThreshold = now - (SKIP_IF_NEWER_THAN_HOURS * 60 * 60 * 1000);
-  const priceOnlyThreshold = now - (PRICE_ONLY_IF_NEWER_THAN_DAYS * 24 * 60 * 60 * 1000);
+  const fullAnalysisThreshold = now - (FULL_ANALYSIS_IF_OLDER_THAN_DAYS * 24 * 60 * 60 * 1000);
 
   const fullAnalysis: string[] = [];
   const priceUpdate: string[] = [];
-  let skipped = 0;
 
   for (const stock of marketStocks) {
     const lastUpdate = cacheMap.get(stock.symbol);
 
     if (lastUpdate) {
-      if (lastUpdate > skipThreshold) {
-        skipped++;
-      } else if (lastUpdate > priceOnlyThreshold) {
-        priceUpdate.push(stock.symbol);
-      } else {
+      // If cached data is older than 7 days -> full analysis
+      // Otherwise -> price update only (but ALWAYS update price)
+      if (lastUpdate < fullAnalysisThreshold) {
         fullAnalysis.push(stock.symbol);
+      } else {
+        priceUpdate.push(stock.symbol);
       }
     } else {
+      // New stock, not in cache -> full analysis
       fullAnalysis.push(stock.symbol);
     }
   }
 
-  return { fullAnalysis, priceUpdate, skipped };
+  console.log(`[${jobName}] ${marketId}: ${fullAnalysis.length} full analysis, ${priceUpdate.length} price updates (no skips)`);
+
+  return { fullAnalysis, priceUpdate, skipped: 0 };
 }
 
 // Build criteria object for screener filtering
