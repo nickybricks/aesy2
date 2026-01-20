@@ -75,6 +75,43 @@ serve(async (req) => {
     
     console.log(`[${jobName}] Starting scheduled quant update...`);
 
+    // MUTEX CHECK: Ensure no other job is currently running
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    const { data: runningJobs, error: runningError } = await supabaseClient
+      .from('scheduled_job_logs')
+      .select('id, job_name, started_at')
+      .eq('status', 'running');
+
+    if (!runningError && runningJobs && runningJobs.length > 0) {
+      // Check if any running job is recent (< 3 hours old)
+      const recentRunningJobs = runningJobs.filter(j => j.started_at >= threeHoursAgo);
+      
+      if (recentRunningJobs.length > 0) {
+        console.log(`[${jobName}] Skipping - another job is already running: ${recentRunningJobs[0].job_name}`);
+        return new Response(
+          JSON.stringify({
+            error: 'Another job is already running',
+            runningJob: recentRunningJobs[0].job_name,
+            skipped: true
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409 }
+        );
+      }
+
+      // Mark old running jobs as stale
+      for (const oldJob of runningJobs.filter(j => j.started_at < threeHoursAgo)) {
+        console.log(`[${jobName}] Marking stale job: ${oldJob.job_name}`);
+        await supabaseClient
+          .from('scheduled_job_logs')
+          .update({
+            status: 'stale',
+            completed_at: new Date().toISOString(),
+            error_message: 'Job timed out - marked as stale by new job start'
+          })
+          .eq('id', oldJob.id);
+      }
+    }
+
     // Create job log entry
     const { data: jobLog, error: jobError } = await supabaseClient
       .from('scheduled_job_logs')
@@ -494,19 +531,23 @@ function buildCriteria(
   incomeStatements: any[], 
   cashFlow: any[]
 ) {
+  // SAFETY: Ensure inputs are arrays
+  const safeIncomeStatements = Array.isArray(incomeStatements) ? incomeStatements : [];
+  const safeCashFlow = Array.isArray(cashFlow) ? cashFlow : [];
+
   // Years of profitability (max 10 years)
-  const yearsOfProfitability = incomeStatements
+  const yearsOfProfitability = safeIncomeStatements
     .slice(0, 10)
     .filter((stmt: any) => stmt.netIncome > 0).length;
   
   // Profitable last 3 years
-  const profitableYearsLast3 = incomeStatements
+  const profitableYearsLast3 = safeIncomeStatements
     .slice(0, 3)
     .filter((stmt: any) => stmt.netIncome > 0).length;
   
   // FCF Margin
-  const latestCashFlow = cashFlow[0] || {};
-  const latestIncome = incomeStatements[0] || {};
+  const latestCashFlow = safeCashFlow[0] || {};
+  const latestIncome = safeIncomeStatements[0] || {};
   const fcfMargin = latestIncome.revenue > 0 
     ? (latestCashFlow.freeCashFlow / latestIncome.revenue) * 100 
     : null;
@@ -522,13 +563,13 @@ function buildCriteria(
   };
   
   // Revenue CAGR values
-  const revenueValues = incomeStatements
+  const revenueValues = safeIncomeStatements
     .slice(0, 11)
     .map((s: any) => s.revenue)
     .filter((v: any) => v > 0);
   
   // EPS CAGR values
-  const epsValues = incomeStatements
+  const epsValues = safeIncomeStatements
     .slice(0, 11)
     .map((s: any) => s.eps || s.epsdiluted)
     .filter((v: any) => v > 0);
