@@ -276,9 +276,16 @@ const QuantAnalysisTable: React.FC<QuantAnalysisTableProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 50;
 
-  // Sort the results using useMemo for performance
+  // Deduplicate and sort the results using useMemo for performance
   const sortedResults = useMemo(() => {
-    const sorted = [...results];
+    // First deduplicate by symbol to prevent duplicate rows
+    const uniqueMap = new Map<string, QuantAnalysisResult>();
+    for (const stock of results) {
+      if (stock?.symbol && !uniqueMap.has(stock.symbol)) {
+        uniqueMap.set(stock.symbol, stock);
+      }
+    }
+    const sorted = Array.from(uniqueMap.values());
     
     sorted.sort((a, b) => {
       let valueA, valueB;
@@ -716,8 +723,8 @@ const QuantAnalysisTable: React.FC<QuantAnalysisTableProps> = ({
                 </TableCell>
               </TableRow>
             ) : (
-              paginatedResults.filter((stock) => stock && stock.criteria).map((stock) => (
-                <TableRow key={stock.symbol} className="h-10">
+              paginatedResults.filter((stock) => stock && stock.criteria).map((stock, index) => (
+                <TableRow key={`${stock.symbol}-${index}`} className="h-10">
                   <TableCell className="py-1 sticky left-0 z-20 bg-background shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
                     <div className="flex items-center gap-2">
                       <DropdownMenu>

@@ -53,7 +53,18 @@ export const ScreenerMode = ({ cachedStocks }: ScreenerModeProps) => {
   });
 
   const filteredStocks = useMemo(() => {
-    return cachedStocks.filter(stock => {
+    // First deduplicate by symbol, keeping the most recent entry
+    const uniqueStocksMap = new Map<string, typeof cachedStocks[0]>();
+    for (const stock of cachedStocks) {
+      if (!stock?.symbol) continue;
+      // Keep the first occurrence (or you could compare updated_at if available)
+      if (!uniqueStocksMap.has(stock.symbol)) {
+        uniqueStocksMap.set(stock.symbol, stock);
+      }
+    }
+    const uniqueStocks = Array.from(uniqueStocksMap.values());
+    
+    return uniqueStocks.filter(stock => {
       // Skip stocks without valid criteria
       if (!stock?.criteria) return false;
       
