@@ -19,6 +19,7 @@ interface ContinuationState {
   jobId: string;
   jobName: string;
   trigger: string;
+  forceFullAnalysis: boolean;
   currentMarketIndex: number;
   markets: string[];
   currentPhase: 'full_analysis' | 'price_update';
@@ -251,6 +252,8 @@ serve(async (req) => {
 
     // Fresh start - initialize new job
     const trigger = body.trigger || 'manual';
+    const forceFullAnalysis = body.forceFullAnalysis === true;
+    const customMarkets = Array.isArray(body.markets) && body.markets.length > 0 ? body.markets : null;
     const jobName = `quant-update-${trigger}-${new Date().toISOString().split('T')[0]}`;
     
     console.log(`[${jobName}] Starting scheduled quant update...`);
@@ -309,11 +312,13 @@ serve(async (req) => {
     }
 
     const jobId = jobLog?.id || 'unknown';
-    const markets = ['NYSE', 'NASDAQ', 'XETRA'];
+    const markets = customMarkets || ['NYSE', 'NASDAQ', 'XETRA'];
+    
+    console.log(`[${jobName}] Processing markets: ${markets.join(', ')}, forceFullAnalysis: ${forceFullAnalysis}`);
 
     // Get stocks for first market and categorize
     const firstMarketStocks = await getAndCategorizeStocks(
-      markets[0], jobName, trigger, supabaseClient, FMP_API_KEY
+      markets[0], jobName, trigger, supabaseClient, FMP_API_KEY, forceFullAnalysis
     );
 
     console.log(`[${jobName}] ${markets[0]} stocks: ${firstMarketStocks.fullAnalysis.length} full, ${firstMarketStocks.priceUpdate.length} price, ${firstMarketStocks.skipped} skipped`);
@@ -327,6 +332,7 @@ serve(async (req) => {
       jobId,
       jobName,
       trigger,
+      forceFullAnalysis,
       currentMarketIndex: 0,
       markets,
       currentPhase: startWithPriceUpdate ? 'price_update' : 'full_analysis',
@@ -581,7 +587,7 @@ async function moveToNextMarket(
   console.log(`[${state.jobName}] Moving to market: ${nextMarket}`);
   
   const marketStocks = await getAndCategorizeStocks(
-    nextMarket, state.jobName, state.trigger, supabaseClient, FMP_API_KEY
+    nextMarket, state.jobName, state.trigger, supabaseClient, FMP_API_KEY, state.forceFullAnalysis
   );
 
   // Start with price updates (fast), then full analysis (slow)
@@ -664,16 +670,17 @@ async function getAndCategorizeStocks(
   jobName: string,
   trigger: string,
   supabaseClient: any,
-  FMP_API_KEY: string
+  FMP_API_KEY: string,
+  forceFullAnalysis: boolean = false
 ): Promise<{ fullAnalysis: string[]; priceUpdate: string[]; skipped: number }> {
   
-  // Determine if this is Monday morning (full analysis day)
+  // Determine if this is Monday morning (full analysis day) or if forced
   const today = new Date();
   const isMonday = today.getUTCDay() === 1;
   const isMorningJob = trigger === 'morning';
-  const doFullAnalysisDay = isMonday && isMorningJob;
+  const doFullAnalysisDay = forceFullAnalysis || (isMonday && isMorningJob);
 
-  console.log(`[${jobName}] Update strategy: isMonday=${isMonday}, isMorningJob=${isMorningJob}, fullAnalysisDay=${doFullAnalysisDay}`);
+  console.log(`[${jobName}] Update strategy: isMonday=${isMonday}, isMorningJob=${isMorningJob}, forceFullAnalysis=${forceFullAnalysis}, fullAnalysisDay=${doFullAnalysisDay}`);
 
   // Get all cached stocks for this market
   // IMPORTANT: Supabase has a default limit of 1000 rows, so we need to paginate
