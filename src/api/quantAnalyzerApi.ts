@@ -56,9 +56,9 @@ export const getStocksByMarket = async (marketId: string) => {
     // Existing exchange logic
     const stocks = await fetchFromFMP('/stock/list');
     
-    // XETRA includes both XETRA (.DE) and FRA (.F) - both are German exchanges
+    // XETRA includes XETRA (.DE), FRA and FSX (.F) - all are German exchanges
     const exchangesToInclude = marketId === 'XETRA' 
-      ? ['XETRA', 'FRA'] 
+      ? ['XETRA', 'FRA', 'FSX'] 
       : [marketId];
     
     return stocks.filter((stock: any) => 

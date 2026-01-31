@@ -738,9 +738,9 @@ async function getAndCategorizeStocks(
     throw new Error(`FMP API error: ${allStocksRaw?.["Error Message"] || allStocksRaw?.message || 'Invalid response - expected array'}`);
   }
 
-  // XETRA includes both XETRA (.DE) and FRA (.F) - both are German exchanges
+  // XETRA includes XETRA (.DE), FRA and FSX (.F) - all are German exchanges
   const exchangesToInclude = marketId === 'XETRA' 
-    ? ['XETRA', 'FRA'] 
+    ? ['XETRA', 'FRA', 'FSX'] 
     : [marketId];
   
   const marketStocks = allStocksRaw.filter((s: any) =>
