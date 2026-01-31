@@ -309,7 +309,7 @@ serve(async (req) => {
     }
 
     const jobId = jobLog?.id || 'unknown';
-    const markets = ['NYSE', 'NASDAQ'];
+    const markets = ['NYSE', 'NASDAQ', 'XETRA'];
 
     // Get stocks for first market and categorize
     const firstMarketStocks = await getAndCategorizeStocks(
