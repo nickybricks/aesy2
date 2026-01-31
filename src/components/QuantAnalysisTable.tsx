@@ -785,86 +785,86 @@ const QuantAnalysisTable: React.FC<QuantAnalysisTableProps> = ({
                   </TableCell>
                   <TableCell className="py-1">
                     <div className="flex items-center space-x-1">
-                      <StatusIcon passed={stock.criteria.yearsOfProfitability.pass} value={stock.criteria.yearsOfProfitability.value} />
-                      <span>{stock.criteria.yearsOfProfitability.value !== null ? stock.criteria.yearsOfProfitability.value : 0}/10</span>
+                      <StatusIcon passed={stock.criteria?.yearsOfProfitability?.pass ?? false} value={stock.criteria?.yearsOfProfitability?.value ?? null} />
+                      <span>{stock.criteria?.yearsOfProfitability?.value !== null ? stock.criteria?.yearsOfProfitability?.value : 0}/10</span>
                     </div>
                   </TableCell>
                   <TableCell className="py-1">
                     <div className="flex items-center space-x-1">
-                      <StatusIcon passed={stock.criteria.pe.pass} value={stock.criteria.pe.value} />
-                      <span>{formatValue(stock.criteria.pe.value, 1, false)}</span>
+                      <StatusIcon passed={stock.criteria?.pe?.pass ?? false} value={stock.criteria?.pe?.value ?? null} />
+                      <span>{formatValue(stock.criteria?.pe?.value ?? null, 1, false)}</span>
                     </div>
                   </TableCell>
                   <TableCell className="py-1">
                     <div className="flex items-center space-x-1">
-                      <StatusIcon passed={stock.criteria.roic.pass} value={stock.criteria.roic.value} />
-                      <span>{formatValue(stock.criteria.roic.value)}</span>
+                      <StatusIcon passed={stock.criteria?.roic?.pass ?? false} value={stock.criteria?.roic?.value ?? null} />
+                      <span>{formatValue(stock.criteria?.roic?.value ?? null)}</span>
                     </div>
                   </TableCell>
                   <TableCell className="py-1">
                     <div className="flex items-center space-x-1">
-                      <StatusIcon passed={stock.criteria.roe.pass} value={stock.criteria.roe.value} />
-                      <span>{formatValue(stock.criteria.roe.value)}</span>
+                      <StatusIcon passed={stock.criteria?.roe?.pass ?? false} value={stock.criteria?.roe?.value ?? null} />
+                      <span>{formatValue(stock.criteria?.roe?.value ?? null)}</span>
                     </div>
                   </TableCell>
                   <TableCell className="py-1">
                     <div className="flex items-center space-x-1">
-                      <StatusIcon passed={stock.criteria.dividendYield.pass} value={stock.criteria.dividendYield.value} />
-                      <span>{formatValue(stock.criteria.dividendYield.value)}</span>
+                      <StatusIcon passed={stock.criteria?.dividendYield?.pass ?? false} value={stock.criteria?.dividendYield?.value ?? null} />
+                      <span>{formatValue(stock.criteria?.dividendYield?.value ?? null)}</span>
                     </div>
                   </TableCell>
                   <TableCell className="py-1">
                     <div className="flex items-center space-x-1">
-                      <StatusIcon passed={stock.criteria.epsGrowth.cagr3y !== null && stock.criteria.epsGrowth.cagr3y >= 5} value={stock.criteria.epsGrowth.cagr3y} />
-                      <span>{formatValue(stock.criteria.epsGrowth.cagr3y)}</span>
+                      <StatusIcon passed={(stock.criteria?.epsGrowth?.cagr3y ?? null) !== null && (stock.criteria?.epsGrowth?.cagr3y ?? 0) >= 5} value={stock.criteria?.epsGrowth?.cagr3y ?? null} />
+                      <span>{formatValue(stock.criteria?.epsGrowth?.cagr3y ?? null)}</span>
                     </div>
                   </TableCell>
                   <TableCell className="py-1">
                     <div className="flex items-center space-x-1">
-                      <StatusIcon passed={stock.criteria.epsGrowth.pass} value={stock.criteria.epsGrowth.value} />
-                      <span>{formatValue(stock.criteria.epsGrowth.value)}</span>
+                      <StatusIcon passed={stock.criteria?.epsGrowth?.pass ?? false} value={stock.criteria?.epsGrowth?.value ?? null} />
+                      <span>{formatValue(stock.criteria?.epsGrowth?.value ?? null)}</span>
                     </div>
                   </TableCell>
                   <TableCell className="py-1">
                     <div className="flex items-center space-x-1">
-                      <StatusIcon passed={stock.criteria.epsGrowth.cagr10y !== null && stock.criteria.epsGrowth.cagr10y >= 5} value={stock.criteria.epsGrowth.cagr10y} />
-                      <span>{formatValue(stock.criteria.epsGrowth.cagr10y)}</span>
+                      <StatusIcon passed={(stock.criteria?.epsGrowth?.cagr10y ?? null) !== null && (stock.criteria?.epsGrowth?.cagr10y ?? 0) >= 5} value={stock.criteria?.epsGrowth?.cagr10y ?? null} />
+                      <span>{formatValue(stock.criteria?.epsGrowth?.cagr10y ?? null)}</span>
                     </div>
                   </TableCell>
                   <TableCell className="py-1">
                     <div className="flex items-center space-x-1">
-                      <StatusIcon passed={stock.criteria.revenueGrowth.cagr3y !== null && stock.criteria.revenueGrowth.cagr3y >= 5} value={stock.criteria.revenueGrowth.cagr3y} />
-                      <span>{formatValue(stock.criteria.revenueGrowth.cagr3y)}</span>
+                      <StatusIcon passed={(stock.criteria?.revenueGrowth?.cagr3y ?? null) !== null && (stock.criteria?.revenueGrowth?.cagr3y ?? 0) >= 5} value={stock.criteria?.revenueGrowth?.cagr3y ?? null} />
+                      <span>{formatValue(stock.criteria?.revenueGrowth?.cagr3y ?? null)}</span>
                     </div>
                   </TableCell>
                   <TableCell className="py-1">
                     <div className="flex items-center space-x-1">
-                      <StatusIcon passed={stock.criteria.revenueGrowth.pass} value={stock.criteria.revenueGrowth.value} />
-                      <span>{formatValue(stock.criteria.revenueGrowth.value)}</span>
+                      <StatusIcon passed={stock.criteria?.revenueGrowth?.pass ?? false} value={stock.criteria?.revenueGrowth?.value ?? null} />
+                      <span>{formatValue(stock.criteria?.revenueGrowth?.value ?? null)}</span>
                     </div>
                   </TableCell>
                   <TableCell className="py-1">
                     <div className="flex items-center space-x-1">
-                      <StatusIcon passed={stock.criteria.revenueGrowth.cagr10y !== null && stock.criteria.revenueGrowth.cagr10y >= 5} value={stock.criteria.revenueGrowth.cagr10y} />
-                      <span>{formatValue(stock.criteria.revenueGrowth.cagr10y)}</span>
+                      <StatusIcon passed={(stock.criteria?.revenueGrowth?.cagr10y ?? null) !== null && (stock.criteria?.revenueGrowth?.cagr10y ?? 0) >= 5} value={stock.criteria?.revenueGrowth?.cagr10y ?? null} />
+                      <span>{formatValue(stock.criteria?.revenueGrowth?.cagr10y ?? null)}</span>
                     </div>
                   </TableCell>
                   <TableCell className="py-1">
                     <div className="flex items-center space-x-1">
-                      <StatusIcon passed={stock.criteria.netDebtToEbitda.pass} value={stock.criteria.netDebtToEbitda.value} />
-                      <span>{formatValue(stock.criteria.netDebtToEbitda.value, 2, false)}</span>
+                      <StatusIcon passed={stock.criteria?.netDebtToEbitda?.pass ?? false} value={stock.criteria?.netDebtToEbitda?.value ?? null} />
+                      <span>{formatValue(stock.criteria?.netDebtToEbitda?.value ?? null, 2, false)}</span>
                     </div>
                   </TableCell>
                   <TableCell className="py-1">
                     <div className="flex items-center space-x-1">
-                      <StatusIcon passed={stock.criteria.netMargin.pass} value={stock.criteria.netMargin.value} />
-                      <span>{formatValue(stock.criteria.netMargin.value)}</span>
+                      <StatusIcon passed={stock.criteria?.netMargin?.pass ?? false} value={stock.criteria?.netMargin?.value ?? null} />
+                      <span>{formatValue(stock.criteria?.netMargin?.value ?? null)}</span>
                     </div>
                   </TableCell>
                   <TableCell className="py-1">
                     <div className="flex items-center space-x-1">
-                      <StatusIcon passed={stock.criteria.fcfMargin?.pass ?? false} value={stock.criteria.fcfMargin?.value ?? null} />
-                      <span>{formatValue(stock.criteria.fcfMargin?.value ?? null)}</span>
+                      <StatusIcon passed={stock.criteria?.fcfMargin?.pass ?? false} value={stock.criteria?.fcfMargin?.value ?? null} />
+                      <span>{formatValue(stock.criteria?.fcfMargin?.value ?? null)}</span>
                     </div>
                   </TableCell>
                 </TableRow>
