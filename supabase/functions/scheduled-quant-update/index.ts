@@ -66,18 +66,11 @@ serve(async (req) => {
     }
 
     // SINGLE STOCK TEST MODE - for quick testing of price updates
+    // Uses SINGLE API call and directly updates the database
     if (body.testSymbol) {
       const symbol = body.testSymbol;
-      const marketId = body.marketId || 'NASDAQ'; // Default to NASDAQ for test
       
       console.log(`[TEST] Testing single stock price update for ${symbol}`);
-      
-      // First, fetch directly from FMP to see what we get
-      const quoteResponse = await fetch(
-        `https://financialmodelingprep.com/api/v3/quote/${symbol}?apikey=${FMP_API_KEY}`
-      );
-      const fmpQuote = await quoteResponse.json();
-      console.log(`[TEST] FMP Quote response:`, JSON.stringify(fmpQuote));
       
       // Get current state before update
       const { data: before, error: beforeError } = await supabaseClient
@@ -92,8 +85,7 @@ serve(async (req) => {
         return new Response(
           JSON.stringify({ 
             error: `Stock ${symbol} not found in cache`, 
-            dbError: beforeError?.message,
-            fmpQuote: fmpQuote 
+            dbError: beforeError?.message
           }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
         );
@@ -108,15 +100,114 @@ serve(async (req) => {
       
       console.log(`[TEST] Before state: price=${beforePrice}, pe=${beforePE}, eps=${beforeEps}, market=${actualMarketId}`);
       
-      // Perform price update for single stock (using actual market_id from DB)
-      const updated = await performBatchPriceUpdate([symbol], actualMarketId, supabaseClient, FMP_API_KEY);
-      console.log(`[TEST] performBatchPriceUpdate returned: ${updated}`);
+      // Fetch quote from FMP (single API call)
+      const quoteResponse = await fetch(
+        `https://financialmodelingprep.com/api/v3/quote/${symbol}?apikey=${FMP_API_KEY}`
+      );
+      const fmpQuoteRaw = await quoteResponse.json();
+      console.log(`[TEST] FMP Quote response:`, JSON.stringify(fmpQuoteRaw));
+      
+      // Check for API limit error
+      if (!Array.isArray(fmpQuoteRaw)) {
+        const errorMsg = fmpQuoteRaw?.['Error Message'] || fmpQuoteRaw?.message || 'Unknown error';
+        console.error(`[TEST] FMP API error: ${errorMsg}`);
+        return new Response(
+          JSON.stringify({ 
+            error: `FMP API error: ${errorMsg}`,
+            fmpResponse: fmpQuoteRaw
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 429 }
+        );
+      }
+      
+      const fmpQuote = fmpQuoteRaw[0];
+      if (!fmpQuote || !fmpQuote.price) {
+        return new Response(
+          JSON.stringify({ 
+            error: `No quote data returned for ${symbol}`,
+            fmpResponse: fmpQuoteRaw
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
+        );
+      }
+      
+      // Directly update the database using the fetched quote (no second API call!)
+      const analysisResult = before.analysis_result;
+      
+      // Get existing EPS to recalculate P/E ratio
+      let eps = analysisResult.eps;
+      if (!eps && analysisResult.peRatio && analysisResult.price && analysisResult.peRatio > 0) {
+        eps = analysisResult.price / analysisResult.peRatio;
+        console.log(`[TEST] Calculated EPS from existing data: ${eps}`);
+      }
+      
+      // Calculate new P/E ratio based on new price
+      let newPE = analysisResult.peRatio;
+      if (fmpQuote.price && fmpQuote.price > 0 && eps && eps > 0) {
+        newPE = fmpQuote.price / eps;
+        console.log(`[TEST] New PE calculated: ${newPE} (price=${fmpQuote.price}, eps=${eps})`);
+      } else if (fmpQuote.pe && fmpQuote.pe > 0) {
+        newPE = fmpQuote.pe;
+        console.log(`[TEST] Using FMP's PE: ${newPE}`);
+      }
+
+      // Update criteria.pe with new P/E value and pass status
+      const updatedCriteria = {
+        ...analysisResult.criteria,
+        pe: {
+          ...analysisResult.criteria?.pe,
+          value: newPE,
+          pass: newPE != null && newPE > 0 && newPE < 20
+        }
+      };
+
+      // Recalculate Buffett Score from updated criteria
+      const newBuffettScore = calculateBuffettScoreFromCriteria(updatedCriteria);
+      console.log(`[TEST] New Buffett Score: ${newBuffettScore}`);
+
+      // Perform the update with market_id constraint
+      const { error: updateError } = await supabaseClient
+        .from('stock_analysis_cache')
+        .update({
+          buffett_score: newBuffettScore,
+          analysis_result: {
+            ...analysisResult,
+            price: fmpQuote.price,
+            change: fmpQuote.change,
+            changesPercentage: fmpQuote.changesPercentage,
+            dayLow: fmpQuote.dayLow,
+            dayHigh: fmpQuote.dayHigh,
+            volume: fmpQuote.volume,
+            marketCap: fmpQuote.marketCap,
+            peRatio: newPE,
+            eps: eps,
+            buffettScore: newBuffettScore,
+            criteria: updatedCriteria
+          },
+          last_updated: new Date().toISOString()
+        })
+        .eq('symbol', symbol)
+        .eq('market_id', actualMarketId);
+      
+      if (updateError) {
+        console.error(`[TEST] Update failed:`, updateError);
+        return new Response(
+          JSON.stringify({ 
+            error: `Update failed: ${updateError.message}`,
+            updateError
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+        );
+      }
+      
+      console.log(`[TEST] Update successful!`);
       
       // Get state after update
       const { data: after } = await supabaseClient
         .from('stock_analysis_cache')
         .select('buffett_score, analysis_result, last_updated')
         .eq('symbol', symbol)
+        .eq('market_id', actualMarketId)
         .single();
       
       const afterPrice = after?.analysis_result?.price;
@@ -132,8 +223,8 @@ serve(async (req) => {
           success: true,
           symbol,
           actualMarketId,
-          updated: updated >= 1,
-          fmpQuote: Array.isArray(fmpQuote) ? fmpQuote[0] : fmpQuote,
+          updated: true,
+          fmpQuote: fmpQuote,
           before: {
             price: beforePrice,
             peRatio: beforePE,
@@ -895,108 +986,136 @@ async function performBatchPriceUpdate(
   supabaseClient: any,
   FMP_API_KEY: string
 ): Promise<number> {
+  console.log(`[Price Update] Fetching quotes for ${symbols.length} symbols in ${marketId}`);
+  
   const symbolsStr = symbols.join(',');
   const quoteResponse = await fetch(
     `https://financialmodelingprep.com/api/v3/quote/${symbolsStr}?apikey=${FMP_API_KEY}`
   );
   const quotes = await quoteResponse.json();
 
+  // Check for API limit error or non-array response
+  if (!Array.isArray(quotes)) {
+    const errorMsg = quotes?.['Error Message'] || quotes?.message || 'Unknown error';
+    console.error(`[Price Update] FMP returned non-array:`, JSON.stringify(quotes));
+    console.error(`[Price Update] API Error: ${errorMsg}`);
+    return 0;
+  }
+
+  console.log(`[Price Update] Got ${quotes.length} quotes from FMP`);
+
   let updated = 0;
-  if (Array.isArray(quotes)) {
-    for (const quote of quotes) {
-      try {
-        // Try both with market_id and without (fallback)
-        let existing = null;
-        
-        // First try with specific market_id
-        const { data: withMarket } = await supabaseClient
+  let notFound = 0;
+  let failed = 0;
+
+  for (const quote of quotes) {
+    try {
+      // Try both with market_id and without (fallback)
+      let existing = null;
+      let actualMarketId = marketId;
+      
+      // First try with specific market_id
+      const { data: withMarket, error: withMarketError } = await supabaseClient
+        .from('stock_analysis_cache')
+        .select('analysis_result, market_id')
+        .eq('symbol', quote.symbol)
+        .eq('market_id', marketId)
+        .single();
+      
+      if (withMarket?.analysis_result) {
+        existing = withMarket;
+        actualMarketId = marketId;
+      } else {
+        // Fallback: try without market_id filter (in case market_id doesn't match)
+        const { data: anyMarket } = await supabaseClient
           .from('stock_analysis_cache')
-          .select('analysis_result')
+          .select('analysis_result, market_id')
           .eq('symbol', quote.symbol)
-          .eq('market_id', marketId)
+          .limit(1)
           .single();
         
-        if (withMarket?.analysis_result) {
-          existing = withMarket;
-        } else {
-          // Fallback: try without market_id filter (in case market_id doesn't match)
-          const { data: anyMarket } = await supabaseClient
-            .from('stock_analysis_cache')
-            .select('analysis_result, market_id')
-            .eq('symbol', quote.symbol)
-            .limit(1)
-            .single();
-          
-          if (anyMarket?.analysis_result) {
-            existing = anyMarket;
-          }
+        if (anyMarket?.analysis_result) {
+          existing = anyMarket;
+          actualMarketId = anyMarket.market_id || marketId;
+          console.log(`[Price Update] ${quote.symbol}: Found in ${actualMarketId} (fallback from ${marketId})`);
         }
-
-        if (existing?.analysis_result) {
-          const analysisResult = existing.analysis_result;
-          const actualMarketId = existing.market_id || marketId;
-          
-          // Get existing EPS to recalculate P/E ratio
-          // Try multiple sources: stored eps, or calculate from pe and price
-          let eps = analysisResult.eps;
-          if (!eps && analysisResult.peRatio && analysisResult.price && analysisResult.peRatio > 0) {
-            // Reverse calculate EPS from existing PE and price
-            eps = analysisResult.price / analysisResult.peRatio;
-          }
-          
-          // Calculate new P/E ratio based on new price
-          let newPE = analysisResult.peRatio; // Keep old PE if we can't calculate new one
-          if (quote.price && quote.price > 0 && eps && eps > 0) {
-            newPE = quote.price / eps;
-          } else if (quote.pe && quote.pe > 0) {
-            // Use FMP's provided PE ratio as fallback
-            newPE = quote.pe;
-          }
-
-          // Update criteria.pe with new P/E value and pass status
-          const updatedCriteria = {
-            ...analysisResult.criteria,
-            pe: {
-              ...analysisResult.criteria?.pe,
-              value: newPE,
-              pass: newPE != null && newPE > 0 && newPE < 20
-            }
-          };
-
-          // Recalculate Buffett Score from updated criteria
-          const newBuffettScore = calculateBuffettScoreFromCriteria(updatedCriteria);
-
-          const { error: updateError } = await supabaseClient
-            .from('stock_analysis_cache')
-            .update({
-              buffett_score: newBuffettScore, // 0-14 scale
-              analysis_result: {
-                ...analysisResult,
-                price: quote.price,
-                change: quote.change,
-                changesPercentage: quote.changesPercentage,
-                dayLow: quote.dayLow,
-                dayHigh: quote.dayHigh,
-                volume: quote.volume,
-                marketCap: quote.marketCap,
-                peRatio: newPE,
-                eps: eps, // Store calculated EPS for future updates
-                buffettScore: newBuffettScore, // 0-14 scale
-                criteria: updatedCriteria
-              },
-              last_updated: new Date().toISOString()
-            })
-            .eq('symbol', quote.symbol);
-          
-          if (!updateError) {
-            updated++;
-          }
-        }
-      } catch (err) {
-        // Continue with next stock on error
-        console.error(`Price update failed for ${quote.symbol}:`, err);
       }
+
+      if (!existing?.analysis_result) {
+        console.warn(`[Price Update] No cache entry found for ${quote.symbol} in ${marketId}`);
+        notFound++;
+        continue;
+      }
+
+      const analysisResult = existing.analysis_result;
+      
+      // Get existing EPS to recalculate P/E ratio
+      // Try multiple sources: stored eps, or calculate from pe and price
+      let eps = analysisResult.eps;
+      if (!eps && analysisResult.peRatio && analysisResult.price && analysisResult.peRatio > 0) {
+        // Reverse calculate EPS from existing PE and price
+        eps = analysisResult.price / analysisResult.peRatio;
+      }
+      
+      // Calculate new P/E ratio based on new price
+      let newPE = analysisResult.peRatio; // Keep old PE if we can't calculate new one
+      if (quote.price && quote.price > 0 && eps && eps > 0) {
+        newPE = quote.price / eps;
+      } else if (quote.pe && quote.pe > 0) {
+        // Use FMP's provided PE ratio as fallback
+        newPE = quote.pe;
+      }
+
+      // Update criteria.pe with new P/E value and pass status
+      const updatedCriteria = {
+        ...analysisResult.criteria,
+        pe: {
+          ...analysisResult.criteria?.pe,
+          value: newPE,
+          pass: newPE != null && newPE > 0 && newPE < 20
+        }
+      };
+
+      // Recalculate Buffett Score from updated criteria
+      const newBuffettScore = calculateBuffettScoreFromCriteria(updatedCriteria);
+
+      // Update with BOTH symbol AND market_id for unique constraint
+      const { error: updateError } = await supabaseClient
+        .from('stock_analysis_cache')
+        .update({
+          buffett_score: newBuffettScore, // 0-14 scale
+          analysis_result: {
+            ...analysisResult,
+            price: quote.price,
+            change: quote.change,
+            changesPercentage: quote.changesPercentage,
+            dayLow: quote.dayLow,
+            dayHigh: quote.dayHigh,
+            volume: quote.volume,
+            marketCap: quote.marketCap,
+            peRatio: newPE,
+            eps: eps, // Store calculated EPS for future updates
+            buffettScore: newBuffettScore, // 0-14 scale
+            criteria: updatedCriteria
+          },
+          last_updated: new Date().toISOString()
+        })
+        .eq('symbol', quote.symbol)
+        .eq('market_id', actualMarketId);
+      
+      if (updateError) {
+        console.error(`[Price Update] Update failed for ${quote.symbol}:`, updateError.message);
+        failed++;
+      } else {
+        updated++;
+      }
+    } catch (err) {
+      // Continue with next stock on error
+      console.error(`[Price Update] Exception for ${quote.symbol}:`, err);
+      failed++;
     }
   }
+
+  console.log(`[Price Update] Completed: ${updated} updated, ${notFound} not found, ${failed} failed`);
   return updated;
 }
