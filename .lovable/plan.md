@@ -1,192 +1,109 @@
 
-## Plan: Preisupdates und Score-Konsistenz korrigieren
+## Plan: Preis-Update Funktion reparieren
 
-### 1. Bug-Fix: `allStocks.filter is not a function`
+### Problemanalyse
 
-**Problem:** Die FMP API gibt manchmal ein Fehler-Objekt statt einem Array zurück
+Nach ausführlicher Untersuchung habe ich folgende Probleme identifiziert:
 
-**Lösung in `scheduled-quant-update/index.ts` (Zeile 477-481):**
+1. **Doppelter API-Call im Test-Modus:** Der Test holt zuerst Quotes von FMP (für Logging), dann ruft `performBatchPriceUpdate` die API **erneut** auf. Wenn das FMP API-Limit erreicht ist, gibt der zweite Call ein Fehler-Objekt zurück und die `Array.isArray(quotes)` Prüfung schlägt fehl - das Update wird komplett übersprungen.
 
-```typescript
-const stocksResponse = await fetch(
-  `https://financialmodelingprep.com/api/v3/stock/list?apikey=${FMP_API_KEY}`
-);
-const allStocksRaw = await stocksResponse.json();
+2. **Fehlendes Logging in `performBatchPriceUpdate`:** Es gibt keine Logs für:
+   - Was die FMP API tatsächlich zurückgibt
+   - Ob `existing` gefunden wurde
+   - Ob das Update erfolgreich war oder fehlgeschlagen ist
+   - Eventueller `updateError`
 
-// SAFETY CHECK: Ensure we have an array
-if (!Array.isArray(allStocksRaw)) {
-  console.error(`[${jobName}] FMP stock list API returned non-array:`, allStocksRaw);
-  throw new Error(`FMP API error: ${allStocksRaw?.message || 'Invalid response'}`);
-}
+3. **API-Limit Problem:** Bei den Batch-Jobs sehe ich in den Logs immer wieder "Self-invoke failed" und "Http: connection closed" - das deutet auf API-Limits oder Timeouts hin.
 
-const allStocks = allStocksRaw;
-```
+### Lösung
 
----
+#### Schritt 1: Besseres Logging hinzufügen
 
-### 2. Neue Update-Strategie: Montags Full-Analysis, sonst nur Preis
-
-**Aktuelle Logik:** Full-Analysis wenn Daten > 7 Tage alt  
-**Neue Logik:** 
-- **Montags (morning):** Immer Full-Analysis für alle Aktien
-- **Sonst (morning/noon/evening):** Nur Preis-Updates
-
-**Änderung in `getAndCategorizeStocks()`:**
+In `performBatchPriceUpdate` muss Logging hinzugefügt werden:
 
 ```typescript
-// Bestimme ob heute Montag ist UND ob es der Morning-Job ist
-const today = new Date();
-const isMonday = today.getUTCDay() === 1;
-const isMorningJob = trigger === 'morning';
-const doFullAnalysisDay = isMonday && isMorningJob;
-
-for (const stock of marketStocks) {
-  if (doFullAnalysisDay) {
-    // Montag morgens: Alles Full-Analysis
-    fullAnalysis.push(stock.symbol);
-  } else {
-    // Alle anderen Jobs: Nur Preis-Update (wenn im Cache)
-    const inCache = cacheMap.has(stock.symbol);
-    if (inCache) {
-      priceUpdate.push(stock.symbol);
+async function performBatchPriceUpdate(...) {
+  console.log(`[Price Update] Fetching quotes for ${symbols.length} symbols`);
+  
+  const quotes = await quoteResponse.json();
+  
+  // Log what FMP returned
+  if (!Array.isArray(quotes)) {
+    console.error(`[Price Update] FMP returned non-array:`, JSON.stringify(quotes));
+    return 0;
+  }
+  
+  console.log(`[Price Update] Got ${quotes.length} quotes from FMP`);
+  
+  for (const quote of quotes) {
+    // ... existing code ...
+    
+    if (!existing?.analysis_result) {
+      console.warn(`[Price Update] No cache entry found for ${quote.symbol} in ${marketId}`);
+      continue;
+    }
+    
+    // ... update code ...
+    
+    if (updateError) {
+      console.error(`[Price Update] Update failed for ${quote.symbol}:`, updateError);
     } else {
-      // Neue Aktie, noch nicht im Cache -> Full-Analysis
-      fullAnalysis.push(stock.symbol);
+      console.log(`[Price Update] Updated ${quote.symbol}: $${quote.price}`);
+      updated++;
     }
   }
+  
+  return updated;
 }
 ```
 
----
+#### Schritt 2: Test-Modus Quote-Daten wiederverwenden
 
-### 3. Buffett Score auf 14-Punkte-Skala umstellen
-
-**Problem:** `calculateBuffettScore()` gibt 0-100 zurück, aber UI erwartet 0-14
-
-**Lösung:** Die Funktion `calculateBuffettScore()` komplett ersetzen mit einer, die die 14 Kriterien zählt (basierend auf `buildCriteria`):
+Im Test-Modus die bereits geholten Quotes an `performBatchPriceUpdate` übergeben oder die Quote-Daten direkt inline verarbeiten:
 
 ```typescript
-function calculateBuffettScore(criteria: any): number {
-  let score = 0;
+// Option A: Quote direkt nutzen (schneller, kein doppelter API-Call)
+if (body.testSymbol) {
+  // ... fetch quote ...
   
-  // 10 Basis-Kriterien
-  if (criteria.yearsOfProfitability?.pass) score++;
-  if (criteria.pe?.pass) score++;
-  if (criteria.roic?.pass) score++;
-  if (criteria.roe?.pass) score++;
-  if (criteria.dividendYield?.pass) score++;
-  if (criteria.netDebtToEbitda?.pass) score++;
-  if (criteria.netMargin?.pass) score++;
-  if (criteria.fcfMargin?.pass) score++;
-  
-  // EPS Growth: 3y, 5y (epsGrowth.pass), 10y
-  if (criteria.epsGrowth?.cagr3y !== null && criteria.epsGrowth?.cagr3y >= 5) score++;
-  if (criteria.epsGrowth?.pass) score++;  // 5y
-  if (criteria.epsGrowth?.cagr10y !== null && criteria.epsGrowth?.cagr10y >= 5) score++;
-  
-  // Revenue Growth: 3y, 5y (revenueGrowth.pass), 10y
-  if (criteria.revenueGrowth?.cagr3y !== null && criteria.revenueGrowth?.cagr3y >= 5) score++;
-  if (criteria.revenueGrowth?.pass) score++;  // 5y
-  if (criteria.revenueGrowth?.cagr10y !== null && criteria.revenueGrowth?.cagr10y >= 5) score++;
-  
-  return score; // 0-14
+  // Direkt updaten ohne performBatchPriceUpdate aufzurufen
+  const result = await updateSingleStockPrice(symbol, fmpQuote[0], supabaseClient);
 }
 ```
 
-**In `performFullAnalysis()` ändern:**
-```typescript
-// Build criteria first
-const criteria = buildCriteria(ratiosData, keyMetricsData, growthData, incomeStatements, cashFlow);
-
-// Calculate score FROM criteria (not separately)
-const buffettScore = calculateBuffettScore(criteria);
-
-// Store with consistent score
-await supabaseClient.from('stock_analysis_cache').upsert({
-  ...
-  buffett_score: buffettScore,  // 0-14
-  analysis_result: {
-    ...
-    buffettScore: buffettScore,  // 0-14
-    criteria
-  }
-});
-```
-
----
-
-### 4. Preis-Update auch KGV neu berechnen
-
-**Problem:** Bei Preis-Updates wird nur der Preis aktualisiert, aber das KGV nicht
-
-**Lösung in `performBatchPriceUpdate()`:**
+#### Schritt 3: API-Limit-Fehler erkennen und handhaben
 
 ```typescript
-// Nach dem Preis-Update: KGV aus bestehenden Daten neu berechnen
-const existingEps = existing.analysis_result?.eps || 
-  (existing.analysis_result?.criteria?.pe?.value && existing.analysis_result.price 
-    ? existing.analysis_result.price / existing.analysis_result.criteria.pe.value 
-    : null);
+const quotes = await quoteResponse.json();
 
-const newPE = quote.price && existingEps && existingEps > 0 
-  ? quote.price / existingEps 
-  : existing.analysis_result?.criteria?.pe?.value;
-
-// Update criteria.pe mit neuem KGV
-const updatedCriteria = {
-  ...existing.analysis_result.criteria,
-  pe: {
-    ...existing.analysis_result.criteria?.pe,
-    value: newPE,
-    pass: newPE != null && newPE > 0 && newPE < 20
-  }
-};
-
-// Recalculate score
-const newBuffettScore = calculateBuffettScore(updatedCriteria);
-
-await supabaseClient.from('stock_analysis_cache').update({
-  buffett_score: newBuffettScore,
-  analysis_result: {
-    ...existing.analysis_result,
-    price: quote.price,
-    buffettScore: newBuffettScore,
-    criteria: updatedCriteria,
-    ...
-  },
-  last_updated: new Date().toISOString()
-});
+// Check for FMP error response
+if (quotes && typeof quotes === 'object' && 'Error Message' in quotes) {
+  console.error(`[Price Update] FMP API error:`, quotes['Error Message']);
+  return 0;
+}
 ```
 
----
+#### Schritt 4: Update-Statement korrigieren
 
-### 5. Trigger-Parameter durchreichen
-
-**Problem:** Die Funktion `getAndCategorizeStocks()` weiß nicht welcher Trigger-Typ es ist
-
-**Lösung:** Den `trigger`-Parameter an die Funktion übergeben:
+Das Update sollte auch `market_id` verwenden für eindeutige Identifizierung:
 
 ```typescript
-async function getAndCategorizeStocks(
-  marketId: string,
-  jobName: string,
-  trigger: string,  // NEU
-  supabaseClient: any,
-  FMP_API_KEY: string
-)
+.eq('symbol', quote.symbol)
+.eq('market_id', actualMarketId)  // HINZUFÜGEN
 ```
 
----
+### Dateien die geändert werden
 
-### Zusammenfassung der Dateien
-
-| Datei | Änderung |
-|-------|----------|
-| `supabase/functions/scheduled-quant-update/index.ts` | Array-Check, Montags-Logik, Score 0-14, KGV-Update bei Preis |
+| Datei | Änderungen |
+|-------|------------|
+| `supabase/functions/scheduled-quant-update/index.ts` | Logging, API-Error-Handling, Update-Statement Fix |
 
 ### Erwartetes Ergebnis
 
-1. **Morgen-/Mittag-/Abend-Jobs:** Nur Preis + KGV Updates (schnell, 1 API-Call pro 100 Aktien)
-2. **Montag-Morgen:** Full-Analysis für alle Aktien (komplette Neubewertung)
-3. **Buffett Score:** Konsistent 0-14 in DB und UI
-4. **Keine Abstürze:** Array-Check verhindert `allStocks.filter is not a function`
+Nach der Implementierung:
+1. Logs zeigen genau warum Updates fehlschlagen
+2. Test-Modus macht nur 1 API-Call statt 2
+3. API-Limit-Fehler werden erkannt und protokolliert
+4. Updates werden mit korrektem `market_id` Constraint ausgeführt
+5. Preise werden zuverlässig aktualisiert bei jedem Cron-Job
+
