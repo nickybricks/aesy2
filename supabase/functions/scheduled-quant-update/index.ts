@@ -678,7 +678,7 @@ async function getAndCategorizeStocks(
   // Get all cached stocks for this market
   // IMPORTANT: Supabase has a default limit of 1000 rows, so we need to paginate
   const cachedSymbols: string[] = [];
-  const PAGE_SIZE = 5000; // Max allowed by Supabase
+  const PAGE_SIZE = 1000; // Supabase enforces max 1000 rows per request
   let offset = 0;
   let hasMore = true;
 
@@ -687,7 +687,9 @@ async function getAndCategorizeStocks(
       .from('stock_analysis_cache')
       .select('symbol')
       .eq('market_id', marketId)
-      .range(offset, offset + PAGE_SIZE - 1);
+      .order('symbol')
+      .range(offset, offset + PAGE_SIZE - 1)
+      .limit(PAGE_SIZE);
 
     if (cacheError) {
       console.error(`[${jobName}] Error fetching cache for ${marketId}:`, cacheError);
