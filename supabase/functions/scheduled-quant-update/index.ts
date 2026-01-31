@@ -676,16 +676,33 @@ async function getAndCategorizeStocks(
   console.log(`[${jobName}] Update strategy: isMonday=${isMonday}, isMorningJob=${isMorningJob}, fullAnalysisDay=${doFullAnalysisDay}`);
 
   // Get all cached stocks for this market
-  const { data: existingCache, error: cacheError } = await supabaseClient
-    .from('stock_analysis_cache')
-    .select('symbol')
-    .eq('market_id', marketId);
+  // IMPORTANT: Supabase has a default limit of 1000 rows, so we need to paginate
+  const cachedSymbols: string[] = [];
+  const PAGE_SIZE = 5000; // Max allowed by Supabase
+  let offset = 0;
+  let hasMore = true;
 
-  if (cacheError) {
-    console.error(`[${jobName}] Error fetching cache for ${marketId}:`, cacheError);
+  while (hasMore) {
+    const { data: page, error: cacheError } = await supabaseClient
+      .from('stock_analysis_cache')
+      .select('symbol')
+      .eq('market_id', marketId)
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (cacheError) {
+      console.error(`[${jobName}] Error fetching cache for ${marketId}:`, cacheError);
+      break;
+    }
+
+    if (page && page.length > 0) {
+      cachedSymbols.push(...page.map((item: any) => item.symbol));
+      offset += PAGE_SIZE;
+      hasMore = page.length === PAGE_SIZE;
+    } else {
+      hasMore = false;
+    }
   }
 
-  const cachedSymbols = (existingCache || []).map((item: any) => item.symbol);
   console.log(`[${jobName}] Found ${cachedSymbols.length} cached stocks in ${marketId}`);
 
   // FOR DAILY JOBS (not Monday morning): Only do price updates, no new stocks
