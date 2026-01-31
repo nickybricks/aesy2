@@ -132,12 +132,12 @@ export const ScreenerMode = ({ cachedStocks }: ScreenerModeProps) => {
   }, [cachedStocks, filters]);
 
   const sectors = useMemo(() => {
-    const uniqueSectors = new Set(cachedStocks.map(s => s.sector));
+    const uniqueSectors = new Set(cachedStocks.map(s => s.sector).filter(s => s && s.trim() !== ''));
     return Array.from(uniqueSectors).sort();
   }, [cachedStocks]);
 
   const exchanges = useMemo(() => {
-    const uniqueExchanges = new Set(cachedStocks.map(s => s.exchange));
+    const uniqueExchanges = new Set(cachedStocks.map(s => s.exchange).filter(e => e && e.trim() !== ''));
     return Array.from(uniqueExchanges).sort();
   }, [cachedStocks]);
 
