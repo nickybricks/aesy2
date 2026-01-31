@@ -134,35 +134,42 @@ serve(async (req) => {
 
     console.log(`[${jobName}] ${markets[0]} stocks: ${firstMarketStocks.fullAnalysis.length} full, ${firstMarketStocks.priceUpdate.length} price, ${firstMarketStocks.skipped} skipped`);
 
-    // Initialize continuation state
+    // IMPORTANT: Start with price updates FIRST (fast, keeps existing data current)
+    // Then do full analysis for new stocks (slow, but less critical)
+    const startWithPriceUpdate = firstMarketStocks.priceUpdate.length > 0;
+    
+    // Initialize continuation state - start with price updates if available
     const state: ContinuationState = {
       jobId,
       jobName,
       trigger,
       currentMarketIndex: 0,
       markets,
-      currentPhase: 'full_analysis',
+      currentPhase: startWithPriceUpdate ? 'price_update' : 'full_analysis',
       batchOffset: 0,
-      stocksToProcess: firstMarketStocks.fullAnalysis,
+      stocksToProcess: startWithPriceUpdate ? firstMarketStocks.priceUpdate : firstMarketStocks.fullAnalysis,
       stats: {
         stocksFullAnalyzed: 0,
         stocksPriceUpdated: 0,
         stocksSkipped: firstMarketStocks.skipped,
         stocksFailed: 0,
-        totalApiCalls: 1, // stock list API call
+        totalApiCalls: firstMarketStocks.fullAnalysis.length > 0 ? 1 : 0, // Only count FMP stock list call if we fetched it
         marketsProcessed: []
       }
     };
 
-    // Store price update stocks for later (in job log metadata)
+    // Store full analysis stocks for later (in job log metadata)
     await supabaseClient
       .from('scheduled_job_logs')
       .update({
         error_message: JSON.stringify({
+          fullAnalysisStocks: { [markets[0]]: firstMarketStocks.fullAnalysis },
           priceUpdateStocks: { [markets[0]]: firstMarketStocks.priceUpdate }
         })
       })
       .eq('id', jobId);
+    
+    console.log(`[${jobName}] Starting with phase: ${state.currentPhase}, stocks: ${state.stocksToProcess.length}`);
 
     // Process first batch immediately
     const result = await processOneBatch(state, supabaseClient, FMP_API_KEY);
@@ -275,6 +282,57 @@ async function processOneBatch(
 ): Promise<{ hasMore: boolean; nextState: ContinuationState }> {
   const nextState = { ...state, stats: { ...state.stats, marketsProcessed: [...state.stats.marketsProcessed] } };
   
+  // PRICE UPDATE PHASE FIRST (fast, keeps existing data current)
+  if (state.currentPhase === 'price_update') {
+    const batchSize = PRICE_UPDATE_BATCH_SIZE;
+    const batch = state.stocksToProcess.slice(state.batchOffset, state.batchOffset + batchSize);
+    
+    if (batch.length > 0) {
+      console.log(`[${state.jobName}] Price update batch: ${batch.length} stocks`);
+      
+      try {
+        const updated = await performBatchPriceUpdate(batch, state.markets[state.currentMarketIndex], supabaseClient, FMP_API_KEY);
+        nextState.stats.stocksPriceUpdated += updated;
+        nextState.stats.totalApiCalls += 1;
+      } catch (error) {
+        console.error(`[${state.jobName}] Batch price update failed:`, error);
+        nextState.stats.stocksFailed += batch.length;
+      }
+
+      nextState.batchOffset = state.batchOffset + batchSize;
+      await updateJobProgress(state.jobId, nextState.stats, supabaseClient);
+    }
+
+    if (nextState.batchOffset < state.stocksToProcess.length) {
+      return { hasMore: true, nextState };
+    }
+
+    // Price updates done - switch to full analysis phase for new stocks
+    const { data: jobLog } = await supabaseClient
+      .from('scheduled_job_logs')
+      .select('error_message')
+      .eq('id', state.jobId)
+      .single();
+
+    let fullAnalysisStocks: string[] = [];
+    try {
+      const metadata = JSON.parse(jobLog?.error_message || '{}');
+      fullAnalysisStocks = metadata.fullAnalysisStocks?.[state.markets[state.currentMarketIndex]] || [];
+    } catch {}
+
+    if (fullAnalysisStocks.length > 0) {
+      nextState.currentPhase = 'full_analysis';
+      nextState.batchOffset = 0;
+      nextState.stocksToProcess = fullAnalysisStocks;
+      console.log(`[${state.jobName}] Switching to full_analysis phase: ${fullAnalysisStocks.length} stocks`);
+      return { hasMore: true, nextState };
+    }
+
+    // Move to next market or finish
+    return await moveToNextMarket(nextState, supabaseClient, FMP_API_KEY);
+  }
+
+  // FULL ANALYSIS PHASE (slow, for new stocks only)
   if (state.currentPhase === 'full_analysis') {
     const batchSize = FULL_ANALYSIS_BATCH_SIZE;
     const batch = state.stocksToProcess.slice(state.batchOffset, state.batchOffset + batchSize);
@@ -300,54 +358,6 @@ async function processOneBatch(
     }
 
     // Check if more full analysis batches remain
-    if (nextState.batchOffset < state.stocksToProcess.length) {
-      return { hasMore: true, nextState };
-    }
-
-    // Switch to price update phase
-    const { data: jobLog } = await supabaseClient
-      .from('scheduled_job_logs')
-      .select('error_message')
-      .eq('id', state.jobId)
-      .single();
-
-    let priceUpdateStocks: string[] = [];
-    try {
-      const metadata = JSON.parse(jobLog?.error_message || '{}');
-      priceUpdateStocks = metadata.priceUpdateStocks?.[state.markets[state.currentMarketIndex]] || [];
-    } catch {}
-
-    if (priceUpdateStocks.length > 0) {
-      nextState.currentPhase = 'price_update';
-      nextState.batchOffset = 0;
-      nextState.stocksToProcess = priceUpdateStocks;
-      return { hasMore: true, nextState };
-    }
-
-    // Move to next market or finish
-    return await moveToNextMarket(nextState, supabaseClient, FMP_API_KEY);
-  }
-
-  if (state.currentPhase === 'price_update') {
-    const batchSize = PRICE_UPDATE_BATCH_SIZE;
-    const batch = state.stocksToProcess.slice(state.batchOffset, state.batchOffset + batchSize);
-    
-    if (batch.length > 0) {
-      console.log(`[${state.jobName}] Price update batch: ${batch.length} stocks`);
-      
-      try {
-        const updated = await performBatchPriceUpdate(batch, state.markets[state.currentMarketIndex], supabaseClient, FMP_API_KEY);
-        nextState.stats.stocksPriceUpdated += updated;
-        nextState.stats.totalApiCalls += 1;
-      } catch (error) {
-        console.error(`[${state.jobName}] Batch price update failed:`, error);
-        nextState.stats.stocksFailed += batch.length;
-      }
-
-      nextState.batchOffset = state.batchOffset + batchSize;
-      await updateJobProgress(state.jobId, nextState.stats, supabaseClient);
-    }
-
     if (nextState.batchOffset < state.stocksToProcess.length) {
       return { hasMore: true, nextState };
     }
@@ -390,13 +400,16 @@ async function moveToNextMarket(
     nextMarket, state.jobName, state.trigger, supabaseClient, FMP_API_KEY
   );
 
-  nextState.currentPhase = 'full_analysis';
+  // Start with price updates (fast), then full analysis (slow)
+  const startWithPriceUpdate = marketStocks.priceUpdate.length > 0;
+  
+  nextState.currentPhase = startWithPriceUpdate ? 'price_update' : 'full_analysis';
   nextState.batchOffset = 0;
-  nextState.stocksToProcess = marketStocks.fullAnalysis;
+  nextState.stocksToProcess = startWithPriceUpdate ? marketStocks.priceUpdate : marketStocks.fullAnalysis;
   nextState.stats.stocksSkipped += marketStocks.skipped;
   nextState.stats.totalApiCalls += 1;
 
-  // Store price update stocks
+  // Store both full analysis and price update stocks for this market
   const { data: jobLog } = await supabaseClient
     .from('scheduled_job_logs')
     .select('error_message')
@@ -408,6 +421,8 @@ async function moveToNextMarket(
     metadata = JSON.parse(jobLog?.error_message || '{}');
   } catch {}
   
+  metadata.fullAnalysisStocks = metadata.fullAnalysisStocks || {};
+  metadata.fullAnalysisStocks[nextMarket] = marketStocks.fullAnalysis;
   metadata.priceUpdateStocks = metadata.priceUpdateStocks || {};
   metadata.priceUpdateStocks[nextMarket] = marketStocks.priceUpdate;
 
@@ -416,7 +431,7 @@ async function moveToNextMarket(
     .update({ error_message: JSON.stringify(metadata) })
     .eq('id', state.jobId);
 
-  console.log(`[${state.jobName}] ${nextMarket}: ${marketStocks.fullAnalysis.length} full, ${marketStocks.priceUpdate.length} price, ${marketStocks.skipped} skipped`);
+  console.log(`[${state.jobName}] ${nextMarket}: ${marketStocks.fullAnalysis.length} full, ${marketStocks.priceUpdate.length} price, starting with ${nextState.currentPhase}`);
 
   return { hasMore: true, nextState };
 }
@@ -467,7 +482,40 @@ async function getAndCategorizeStocks(
   supabaseClient: any,
   FMP_API_KEY: string
 ): Promise<{ fullAnalysis: string[]; priceUpdate: string[]; skipped: number }> {
-  console.log(`[${jobName}] Fetching stock list for ${marketId}...`);
+  
+  // Determine if this is Monday morning (full analysis day)
+  const today = new Date();
+  const isMonday = today.getUTCDay() === 1;
+  const isMorningJob = trigger === 'morning';
+  const doFullAnalysisDay = isMonday && isMorningJob;
+
+  console.log(`[${jobName}] Update strategy: isMonday=${isMonday}, isMorningJob=${isMorningJob}, fullAnalysisDay=${doFullAnalysisDay}`);
+
+  // Get all cached stocks for this market
+  const { data: existingCache, error: cacheError } = await supabaseClient
+    .from('stock_analysis_cache')
+    .select('symbol')
+    .eq('market_id', marketId);
+
+  if (cacheError) {
+    console.error(`[${jobName}] Error fetching cache for ${marketId}:`, cacheError);
+  }
+
+  const cachedSymbols = (existingCache || []).map((item: any) => item.symbol);
+  console.log(`[${jobName}] Found ${cachedSymbols.length} cached stocks in ${marketId}`);
+
+  // FOR DAILY JOBS (not Monday morning): Only do price updates, no new stocks
+  if (!doFullAnalysisDay) {
+    console.log(`[${jobName}] ${marketId}: Price-only mode - ${cachedSymbols.length} stocks for price update, 0 for full analysis`);
+    return { 
+      fullAnalysis: [], 
+      priceUpdate: cachedSymbols, 
+      skipped: 0 
+    };
+  }
+
+  // MONDAY MORNING: Full analysis for all stocks (fetch from FMP)
+  console.log(`[${jobName}] Fetching FMP stock list for full analysis...`);
   
   const stocksResponse = await fetch(
     `https://financialmodelingprep.com/api/v3/stock/list?apikey=${FMP_API_KEY}`
@@ -484,52 +532,15 @@ async function getAndCategorizeStocks(
     s.exchangeShortName === marketId && s.type === 'stock' && !s.isEtf
   );
 
-  console.log(`[${jobName}] Found ${marketStocks.length} stocks in ${marketId}`);
+  const fullAnalysisSymbols = marketStocks.map((s: any) => s.symbol);
+  
+  console.log(`[${jobName}] ${marketId}: Full analysis mode - ${fullAnalysisSymbols.length} stocks for full analysis, 0 for price update`);
 
-  // Get cache data
-  const { data: existingCache } = await supabaseClient
-    .from('stock_analysis_cache')
-    .select('symbol, last_updated')
-    .eq('market_id', marketId);
-
-  const cacheMap = new Map<string, number>();
-  if (existingCache) {
-    for (const item of existingCache) {
-      cacheMap.set(item.symbol, new Date(item.last_updated).getTime());
-    }
-  }
-
-  // Determine if this is Monday morning (full analysis day)
-  const today = new Date();
-  const isMonday = today.getUTCDay() === 1;
-  const isMorningJob = trigger === 'morning';
-  const doFullAnalysisDay = isMonday && isMorningJob;
-
-  console.log(`[${jobName}] Update strategy: isMonday=${isMonday}, isMorningJob=${isMorningJob}, fullAnalysisDay=${doFullAnalysisDay}`);
-
-  const fullAnalysis: string[] = [];
-  const priceUpdate: string[] = [];
-
-  for (const stock of marketStocks) {
-    const inCache = cacheMap.has(stock.symbol);
-
-    if (doFullAnalysisDay) {
-      // Monday morning: Full analysis for ALL stocks
-      fullAnalysis.push(stock.symbol);
-    } else {
-      // All other jobs: Only price updates (if in cache), otherwise full analysis for new stocks
-      if (inCache) {
-        priceUpdate.push(stock.symbol);
-      } else {
-        // New stock, not in cache -> needs full analysis
-        fullAnalysis.push(stock.symbol);
-      }
-    }
-  }
-
-  console.log(`[${jobName}] ${marketId}: ${fullAnalysis.length} full analysis, ${priceUpdate.length} price updates (no skips)`);
-
-  return { fullAnalysis, priceUpdate, skipped: 0 };
+  return { 
+    fullAnalysis: fullAnalysisSymbols, 
+    priceUpdate: [], 
+    skipped: 0 
+  };
 }
 
 // Build criteria object for screener filtering
