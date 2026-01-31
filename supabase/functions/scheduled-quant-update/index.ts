@@ -738,8 +738,13 @@ async function getAndCategorizeStocks(
     throw new Error(`FMP API error: ${allStocksRaw?.["Error Message"] || allStocksRaw?.message || 'Invalid response - expected array'}`);
   }
 
+  // XETRA includes both XETRA (.DE) and FRA (.F) - both are German exchanges
+  const exchangesToInclude = marketId === 'XETRA' 
+    ? ['XETRA', 'FRA'] 
+    : [marketId];
+  
   const marketStocks = allStocksRaw.filter((s: any) =>
-    s.exchangeShortName === marketId && s.type === 'stock' && !s.isEtf
+    exchangesToInclude.includes(s.exchangeShortName) && s.type === 'stock' && !s.isEtf
   );
 
   const fullAnalysisSymbols = marketStocks.map((s: any) => s.symbol);
