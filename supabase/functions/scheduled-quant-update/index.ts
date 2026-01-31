@@ -15,9 +15,6 @@ const PRICE_UPDATE_BATCH_SIZE = 700;
 // Process one batch per invocation, then self-invoke for next batch
 const BATCH_DELAY_MS = 5000; // 5 seconds between self-invocations
 
-// Cache age thresholds - always update prices, only skip full analysis
-const FULL_ANALYSIS_IF_OLDER_THAN_DAYS = 7;
-
 interface ContinuationState {
   jobId: string;
   jobName: string;
@@ -132,7 +129,7 @@ serve(async (req) => {
 
     // Get stocks for first market and categorize
     const firstMarketStocks = await getAndCategorizeStocks(
-      markets[0], jobName, supabaseClient, FMP_API_KEY
+      markets[0], jobName, trigger, supabaseClient, FMP_API_KEY
     );
 
     console.log(`[${jobName}] ${markets[0]} stocks: ${firstMarketStocks.fullAnalysis.length} full, ${firstMarketStocks.priceUpdate.length} price, ${firstMarketStocks.skipped} skipped`);
@@ -390,7 +387,7 @@ async function moveToNextMarket(
   console.log(`[${state.jobName}] Moving to market: ${nextMarket}`);
   
   const marketStocks = await getAndCategorizeStocks(
-    nextMarket, state.jobName, supabaseClient, FMP_API_KEY
+    nextMarket, state.jobName, state.trigger, supabaseClient, FMP_API_KEY
   );
 
   nextState.currentPhase = 'full_analysis';
@@ -466,6 +463,7 @@ async function updateJobProgress(jobId: string, stats: ContinuationState['stats'
 async function getAndCategorizeStocks(
   marketId: string,
   jobName: string,
+  trigger: string,
   supabaseClient: any,
   FMP_API_KEY: string
 ): Promise<{ fullAnalysis: string[]; priceUpdate: string[]; skipped: number }> {
@@ -474,9 +472,15 @@ async function getAndCategorizeStocks(
   const stocksResponse = await fetch(
     `https://financialmodelingprep.com/api/v3/stock/list?apikey=${FMP_API_KEY}`
   );
-  const allStocks = await stocksResponse.json();
+  const allStocksRaw = await stocksResponse.json();
 
-  const marketStocks = allStocks.filter((s: any) =>
+  // SAFETY CHECK: Ensure we have an array (FMP sometimes returns error object)
+  if (!Array.isArray(allStocksRaw)) {
+    console.error(`[${jobName}] FMP stock list API returned non-array:`, allStocksRaw);
+    throw new Error(`FMP API error: ${allStocksRaw?.["Error Message"] || allStocksRaw?.message || 'Invalid response - expected array'}`);
+  }
+
+  const marketStocks = allStocksRaw.filter((s: any) =>
     s.exchangeShortName === marketId && s.type === 'stock' && !s.isEtf
   );
 
@@ -495,26 +499,31 @@ async function getAndCategorizeStocks(
     }
   }
 
-  const now = Date.now();
-  const fullAnalysisThreshold = now - (FULL_ANALYSIS_IF_OLDER_THAN_DAYS * 24 * 60 * 60 * 1000);
+  // Determine if this is Monday morning (full analysis day)
+  const today = new Date();
+  const isMonday = today.getUTCDay() === 1;
+  const isMorningJob = trigger === 'morning';
+  const doFullAnalysisDay = isMonday && isMorningJob;
+
+  console.log(`[${jobName}] Update strategy: isMonday=${isMonday}, isMorningJob=${isMorningJob}, fullAnalysisDay=${doFullAnalysisDay}`);
 
   const fullAnalysis: string[] = [];
   const priceUpdate: string[] = [];
 
   for (const stock of marketStocks) {
-    const lastUpdate = cacheMap.get(stock.symbol);
+    const inCache = cacheMap.has(stock.symbol);
 
-    if (lastUpdate) {
-      // If cached data is older than 7 days -> full analysis
-      // Otherwise -> price update only (but ALWAYS update price)
-      if (lastUpdate < fullAnalysisThreshold) {
-        fullAnalysis.push(stock.symbol);
-      } else {
-        priceUpdate.push(stock.symbol);
-      }
-    } else {
-      // New stock, not in cache -> full analysis
+    if (doFullAnalysisDay) {
+      // Monday morning: Full analysis for ALL stocks
       fullAnalysis.push(stock.symbol);
+    } else {
+      // All other jobs: Only price updates (if in cache), otherwise full analysis for new stocks
+      if (inCache) {
+        priceUpdate.push(stock.symbol);
+      } else {
+        // New stock, not in cache -> needs full analysis
+        fullAnalysis.push(stock.symbol);
+      }
     }
   }
 
@@ -649,6 +658,35 @@ function buildCriteria(
   };
 }
 
+// Calculate Buffett Score from criteria (0-14 scale)
+function calculateBuffettScoreFromCriteria(criteria: any): number {
+  if (!criteria) return 0;
+  
+  let score = 0;
+  
+  // 10 Base criteria
+  if (criteria.yearsOfProfitability?.pass) score++;
+  if (criteria.pe?.pass) score++;
+  if (criteria.roic?.pass) score++;
+  if (criteria.roe?.pass) score++;
+  if (criteria.dividendYield?.pass) score++;
+  if (criteria.netDebtToEbitda?.pass) score++;
+  if (criteria.netMargin?.pass) score++;
+  if (criteria.fcfMargin?.pass) score++;
+  
+  // EPS Growth: 3y, 5y (epsGrowth.pass), 10y
+  if (criteria.epsGrowth?.cagr3y !== null && criteria.epsGrowth?.cagr3y !== undefined && criteria.epsGrowth.cagr3y >= 5) score++;
+  if (criteria.epsGrowth?.pass) score++;  // 5y
+  if (criteria.epsGrowth?.cagr10y !== null && criteria.epsGrowth?.cagr10y !== undefined && criteria.epsGrowth.cagr10y >= 5) score++;
+  
+  // Revenue Growth: 3y, 5y (revenueGrowth.pass), 10y
+  if (criteria.revenueGrowth?.cagr3y !== null && criteria.revenueGrowth?.cagr3y !== undefined && criteria.revenueGrowth.cagr3y >= 5) score++;
+  if (criteria.revenueGrowth?.pass) score++;  // 5y
+  if (criteria.revenueGrowth?.cagr10y !== null && criteria.revenueGrowth?.cagr10y !== undefined && criteria.revenueGrowth.cagr10y >= 5) score++;
+  
+  return score; // 0-14
+}
+
 async function performFullAnalysis(
   symbol: string,
   marketId: string,
@@ -680,15 +718,14 @@ async function performFullAnalysis(
   const latestCashFlow = cashFlow[0] || {};
   const growthData = growthMetrics[0] || {};
 
-  const buffettScore = calculateBuffettScore({
-    ratios: ratiosData,
-    keyMetrics: keyMetricsData,
-    cashFlow: latestCashFlow,
-    growth: growthData
-  });
-
   // Build criteria object for screener filtering
   const criteria = buildCriteria(ratiosData, keyMetricsData, growthData, incomeStatements, cashFlow);
+
+  // Calculate Buffett Score from criteria (0-14 scale)
+  const buffettScore = calculateBuffettScoreFromCriteria(criteria);
+
+  // Store EPS for later price updates (to recalculate P/E)
+  const eps = latestIncome.eps || latestIncome.epsdiluted || null;
 
   // Store raw data
   await supabaseClient
@@ -703,13 +740,13 @@ async function performFullAnalysis(
       last_updated: new Date().toISOString()
     });
 
-  // Store analysis with criteria object
+  // Store analysis with criteria object and 0-14 score
   await supabaseClient
     .from('stock_analysis_cache')
     .upsert({
       symbol,
       market_id: marketId,
-      buffett_score: buffettScore.total,
+      buffett_score: buffettScore, // 0-14 scale
       analysis_result: {
         symbol,
         name: profileData?.companyName,
@@ -719,8 +756,8 @@ async function performFullAnalysis(
         price: quoteData?.price || 0,
         currency: profileData?.currency || 'USD',
         marketCap: quoteData?.marketCap || profileData?.mktCap,
-        buffettScore: buffettScore.total,
-        buffettScoreDetails: buffettScore.details,
+        buffettScore: buffettScore, // 0-14 scale
+        eps: eps, // Store EPS for price update recalculations
         peRatio: ratiosData?.peRatioTTM,
         pbRatio: ratiosData?.priceToBookRatioTTM,
         pfcfRatio: ratiosData?.priceToFreeCashFlowsRatioTTM,
@@ -742,7 +779,7 @@ async function performFullAnalysis(
         description: profileData?.description,
         change: quoteData?.change,
         changesPercentage: quoteData?.changesPercentage,
-        criteria  // NEW: criteria object for screener filtering
+        criteria  // Criteria object for screener filtering
       },
       last_updated: new Date().toISOString()
     });
@@ -771,18 +808,46 @@ async function performBatchPriceUpdate(
         .single();
 
       if (existing?.analysis_result) {
+        const analysisResult = existing.analysis_result;
+        
+        // Get existing EPS to recalculate P/E ratio
+        const eps = analysisResult.eps || null;
+        
+        // Calculate new P/E ratio based on new price
+        let newPE = analysisResult.peRatio;
+        if (quote.price && quote.price > 0 && eps && eps > 0) {
+          newPE = quote.price / eps;
+        }
+
+        // Update criteria.pe with new P/E value and pass status
+        const updatedCriteria = {
+          ...analysisResult.criteria,
+          pe: {
+            ...analysisResult.criteria?.pe,
+            value: newPE,
+            pass: newPE != null && newPE > 0 && newPE < 20
+          }
+        };
+
+        // Recalculate Buffett Score from updated criteria
+        const newBuffettScore = calculateBuffettScoreFromCriteria(updatedCriteria);
+
         await supabaseClient
           .from('stock_analysis_cache')
           .update({
+            buffett_score: newBuffettScore, // 0-14 scale
             analysis_result: {
-              ...existing.analysis_result,
+              ...analysisResult,
               price: quote.price,
               change: quote.change,
               changesPercentage: quote.changesPercentage,
               dayLow: quote.dayLow,
               dayHigh: quote.dayHigh,
               volume: quote.volume,
-              marketCap: quote.marketCap
+              marketCap: quote.marketCap,
+              peRatio: newPE,
+              buffettScore: newBuffettScore, // 0-14 scale
+              criteria: updatedCriteria
             },
             last_updated: new Date().toISOString()
           })
@@ -793,87 +858,4 @@ async function performBatchPriceUpdate(
     }
   }
   return updated;
-}
-
-function calculateBuffettScore(data: {
-  ratios: any;
-  keyMetrics: any;
-  cashFlow: any;
-  growth: any;
-}): { total: number; details: any } {
-  const { ratios, keyMetrics, cashFlow, growth } = data;
-
-  let totalScore = 0;
-  const maxScore = 100;
-  const details: any = {};
-
-  // 1. ROE > 15% (10 points)
-  const roe = ratios?.returnOnEquityTTM || 0;
-  if (roe >= 0.20) { totalScore += 10; details.roe = { score: 10, value: roe, status: 'excellent' }; }
-  else if (roe >= 0.15) { totalScore += 7; details.roe = { score: 7, value: roe, status: 'good' }; }
-  else if (roe >= 0.10) { totalScore += 4; details.roe = { score: 4, value: roe, status: 'fair' }; }
-  else { details.roe = { score: 0, value: roe, status: 'poor' }; }
-
-  // 2. ROIC > 10% (10 points)
-  const roic = ratios?.roicTTM || keyMetrics?.roicTTM || 0;
-  if (roic >= 0.15) { totalScore += 10; details.roic = { score: 10, value: roic, status: 'excellent' }; }
-  else if (roic >= 0.10) { totalScore += 7; details.roic = { score: 7, value: roic, status: 'good' }; }
-  else if (roic >= 0.07) { totalScore += 4; details.roic = { score: 4, value: roic, status: 'fair' }; }
-  else { details.roic = { score: 0, value: roic, status: 'poor' }; }
-
-  // 3. Debt to Equity < 0.5 (10 points)
-  const debtToEquity = ratios?.debtEquityRatioTTM || 0;
-  if (debtToEquity < 0.3) { totalScore += 10; details.debtToEquity = { score: 10, value: debtToEquity, status: 'excellent' }; }
-  else if (debtToEquity < 0.5) { totalScore += 7; details.debtToEquity = { score: 7, value: debtToEquity, status: 'good' }; }
-  else if (debtToEquity < 1) { totalScore += 4; details.debtToEquity = { score: 4, value: debtToEquity, status: 'fair' }; }
-  else { details.debtToEquity = { score: 0, value: debtToEquity, status: 'poor' }; }
-
-  // 4. Current Ratio > 1.5 (10 points)
-  const currentRatio = ratios?.currentRatioTTM || 0;
-  if (currentRatio >= 2) { totalScore += 10; details.currentRatio = { score: 10, value: currentRatio, status: 'excellent' }; }
-  else if (currentRatio >= 1.5) { totalScore += 7; details.currentRatio = { score: 7, value: currentRatio, status: 'good' }; }
-  else if (currentRatio >= 1) { totalScore += 4; details.currentRatio = { score: 4, value: currentRatio, status: 'fair' }; }
-  else { details.currentRatio = { score: 0, value: currentRatio, status: 'poor' }; }
-
-  // 5. Gross Margin > 40% (10 points)
-  const grossMargin = ratios?.grossProfitMarginTTM || 0;
-  if (grossMargin >= 0.50) { totalScore += 10; details.grossMargin = { score: 10, value: grossMargin, status: 'excellent' }; }
-  else if (grossMargin >= 0.40) { totalScore += 7; details.grossMargin = { score: 7, value: grossMargin, status: 'good' }; }
-  else if (grossMargin >= 0.30) { totalScore += 4; details.grossMargin = { score: 4, value: grossMargin, status: 'fair' }; }
-  else { details.grossMargin = { score: 0, value: grossMargin, status: 'poor' }; }
-
-  // 6. Net Margin > 10% (10 points)
-  const netMargin = ratios?.netProfitMarginTTM || 0;
-  if (netMargin >= 0.15) { totalScore += 10; details.netMargin = { score: 10, value: netMargin, status: 'excellent' }; }
-  else if (netMargin >= 0.10) { totalScore += 7; details.netMargin = { score: 7, value: netMargin, status: 'good' }; }
-  else if (netMargin >= 0.05) { totalScore += 4; details.netMargin = { score: 4, value: netMargin, status: 'fair' }; }
-  else { details.netMargin = { score: 0, value: netMargin, status: 'poor' }; }
-
-  // 7. P/E Ratio (10 points)
-  const pe = ratios?.peRatioTTM || 0;
-  if (pe > 0 && pe < 15) { totalScore += 10; details.peRatio = { score: 10, value: pe, status: 'excellent' }; }
-  else if (pe > 0 && pe < 20) { totalScore += 7; details.peRatio = { score: 7, value: pe, status: 'good' }; }
-  else if (pe > 0 && pe < 30) { totalScore += 4; details.peRatio = { score: 4, value: pe, status: 'fair' }; }
-  else { details.peRatio = { score: 0, value: pe, status: 'poor' }; }
-
-  // 8. Free Cash Flow positive (10 points)
-  const fcf = cashFlow?.freeCashFlow || 0;
-  if (fcf > 0) { totalScore += 10; details.freeCashFlow = { score: 10, value: fcf, status: 'excellent' }; }
-  else { details.freeCashFlow = { score: 0, value: fcf, status: 'poor' }; }
-
-  // 9. Revenue Growth (10 points)
-  const revenueGrowth = growth?.revenueGrowth || 0;
-  if (revenueGrowth >= 0.10) { totalScore += 10; details.revenueGrowth = { score: 10, value: revenueGrowth, status: 'excellent' }; }
-  else if (revenueGrowth >= 0.05) { totalScore += 7; details.revenueGrowth = { score: 7, value: revenueGrowth, status: 'good' }; }
-  else if (revenueGrowth >= 0) { totalScore += 4; details.revenueGrowth = { score: 4, value: revenueGrowth, status: 'fair' }; }
-  else { details.revenueGrowth = { score: 0, value: revenueGrowth, status: 'poor' }; }
-
-  // 10. Interest Coverage > 5 (10 points)
-  const interestCoverage = ratios?.interestCoverageTTM || 0;
-  if (interestCoverage >= 10) { totalScore += 10; details.interestCoverage = { score: 10, value: interestCoverage, status: 'excellent' }; }
-  else if (interestCoverage >= 5) { totalScore += 7; details.interestCoverage = { score: 7, value: interestCoverage, status: 'good' }; }
-  else if (interestCoverage >= 2) { totalScore += 4; details.interestCoverage = { score: 4, value: interestCoverage, status: 'fair' }; }
-  else { details.interestCoverage = { score: 0, value: interestCoverage, status: 'poor' }; }
-
-  return { total: Math.round((totalScore / maxScore) * 100), details };
 }
