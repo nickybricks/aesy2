@@ -138,6 +138,7 @@ export interface QuantAnalysisResult {
   name: string;
   exchange: string;
   sector: string;
+  industry: string;
   country: string;
   buffettScore: number; // Max 14 points
   criteria: {
@@ -603,6 +604,7 @@ export const analyzeStockByBuffettCriteria = async (ticker: string): Promise<Qua
       name: companyProfile.companyName,
       exchange: companyProfile.exchangeShortName,
       sector: companyProfile.sector || 'Unknown',
+      industry: companyProfile.industry || 'Unknown',
       country: companyProfile.country || 'Unknown',
       buffettScore,
       criteria: {

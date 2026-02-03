@@ -309,6 +309,10 @@ const QuantAnalysisTable: React.FC<QuantAnalysisTableProps> = ({
           valueA = a.sector;
           valueB = b.sector;
           break;
+        case 'industry':
+          valueA = a.industry || '';
+          valueB = b.industry || '';
+          break;
         case 'price':
           valueA = a.price;
           valueB = b.price;
@@ -529,10 +533,20 @@ const QuantAnalysisTable: React.FC<QuantAnalysisTableProps> = ({
                   setSortDirection={setSortDirection}
                 />
               </TableHead>
+              <TableHead className="min-w-[180px] px-4 py-2 h-10">
+                <SortableHeader 
+                  field="industry" 
+                  name="Industrie" 
+                  sortField={sortField}
+                  sortDirection={sortDirection}
+                  setSortField={setSortField}
+                  setSortDirection={setSortDirection}
+                />
+              </TableHead>
               <TableHead className="min-w-[150px] px-4 py-2 h-10">
                 <SortableHeader 
                   field="buffettScore" 
-                  name="Score" 
+                  name="Score"
                   tooltipText="Erfüllte Kriterien (max. 10)"
                   sortField={sortField}
                   sortDirection={sortDirection}
@@ -709,7 +723,7 @@ const QuantAnalysisTable: React.FC<QuantAnalysisTableProps> = ({
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={19} className="text-center py-8">
+                <TableCell colSpan={20} className="text-center py-8">
                   <div className="flex flex-col items-center justify-center">
                     <div className="w-8 h-8 border-4 border-t-blue-500 rounded-full animate-spin mb-2"></div>
                     <span>Analyse läuft...</span>
@@ -718,7 +732,7 @@ const QuantAnalysisTable: React.FC<QuantAnalysisTableProps> = ({
               </TableRow>
             ) : paginatedResults.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={19} className="text-center py-8">
+                <TableCell colSpan={20} className="text-center py-8">
                   Keine Ergebnisse gefunden
                 </TableCell>
               </TableRow>
@@ -776,6 +790,9 @@ const QuantAnalysisTable: React.FC<QuantAnalysisTableProps> = ({
                   </TableCell>
                   <TableCell className="py-1">{stock.exchange}</TableCell>
                   <TableCell className="py-1">{stock.sector}</TableCell>
+                  <TableCell className="py-1">
+                    <span className="truncate max-w-[180px] block">{stock.industry || '-'}</span>
+                  </TableCell>
                   <TableCell className="py-1">
                     {(() => {
                       const calculatedScore = calculateBuffettScoreFromCriteria(stock.criteria);
