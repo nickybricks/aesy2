@@ -48,6 +48,7 @@ export const ScreenerMode = ({ cachedStocks }: ScreenerModeProps) => {
     minFcfMargin: '',
     maxFcfMargin: '',
     sector: 'all',
+    industry: 'all',
     exchange: 'all',
     searchQuery: ''
   });
@@ -131,6 +132,9 @@ export const ScreenerMode = ({ cachedStocks }: ScreenerModeProps) => {
       // Sector filter
       if (filters.sector !== 'all' && stock.sector !== filters.sector) return false;
       
+      // Industry filter
+      if (filters.industry !== 'all' && stock.industry !== filters.industry) return false;
+      
       // Exchange filter
       if (filters.exchange !== 'all' && stock.exchange !== filters.exchange) return false;
       
@@ -145,6 +149,11 @@ export const ScreenerMode = ({ cachedStocks }: ScreenerModeProps) => {
   const sectors = useMemo(() => {
     const uniqueSectors = new Set(cachedStocks.map(s => s.sector).filter(s => s && s.trim() !== ''));
     return Array.from(uniqueSectors).sort();
+  }, [cachedStocks]);
+
+  const industries = useMemo(() => {
+    const uniqueIndustries = new Set(cachedStocks.map(s => s.industry).filter(i => i && i.trim() !== ''));
+    return Array.from(uniqueIndustries).sort();
   }, [cachedStocks]);
 
   const exchanges = useMemo(() => {
@@ -181,6 +190,22 @@ export const ScreenerMode = ({ cachedStocks }: ScreenerModeProps) => {
                     <SelectItem value="all">Alle Sektoren</SelectItem>
                     {sectors.map(sector => (
                       <SelectItem key={sector} value={sector}>{sector}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Industry */}
+              <div className="space-y-2">
+                <Label>Industrie</Label>
+                <Select value={filters.industry} onValueChange={(value) => setFilters({ ...filters, industry: value })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Alle Industrien</SelectItem>
+                    {industries.map(industry => (
+                      <SelectItem key={industry} value={industry}>{industry}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
