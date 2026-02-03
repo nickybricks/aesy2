@@ -8,12 +8,16 @@ const corsHeaders = {
 
 // Rate limiting configuration based on FMP API limits (750 calls/minute)
 // Full analysis = 9 API calls per stock → max 83 stocks/minute
+// To stay safe, we process 40 stocks/batch with 100ms delay = ~54 calls/sec = ~650/min
 // Price-only update = 1 API call per stock → max 750 stocks/minute
-const FULL_ANALYSIS_BATCH_SIZE = 80;
-const PRICE_UPDATE_BATCH_SIZE = 700;
+const FULL_ANALYSIS_BATCH_SIZE = 40; // Reduced to stay within rate limits
+const PRICE_UPDATE_BATCH_SIZE = 500; // Reduced for safety margin
 
 // Process one batch per invocation, then self-invoke for next batch
 const BATCH_DELAY_MS = 5000; // 5 seconds between self-invocations
+
+// Delay between individual API calls within a batch (ms)
+const INTER_STOCK_DELAY_MS = 100; // 100ms between stocks = ~600 calls/min max
 
 interface ContinuationState {
   jobId: string;
@@ -530,14 +534,27 @@ async function processOneBatch(
     if (batch.length > 0) {
       console.log(`[${state.jobName}] Full analysis batch: ${batch.length} stocks (${state.batchOffset + 1}-${state.batchOffset + batch.length} of ${state.stocksToProcess.length})`);
       
-      for (const symbol of batch) {
+      for (let i = 0; i < batch.length; i++) {
+        const symbol = batch[i];
         try {
           await performFullAnalysis(symbol, state.markets[state.currentMarketIndex], supabaseClient, FMP_API_KEY);
           nextState.stats.stocksFullAnalyzed++;
           nextState.stats.totalApiCalls += 9;
+          
+          // Rate limiting: delay between stocks to stay under 750 calls/min
+          if (i < batch.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, INTER_STOCK_DELAY_MS));
+          }
         } catch (error) {
           console.error(`[${state.jobName}] Failed: ${symbol}`, error);
           nextState.stats.stocksFailed++;
+          
+          // If rate limit error, wait longer before continuing
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          if (errorMsg.includes('Limit Reach') || errorMsg.includes('rate limit')) {
+            console.log(`[${state.jobName}] Rate limit hit, waiting 60 seconds...`);
+            await new Promise(resolve => setTimeout(resolve, 60000));
+          }
         }
       }
 
