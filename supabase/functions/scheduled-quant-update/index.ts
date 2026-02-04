@@ -13,6 +13,11 @@ const corsHeaders = {
 const FULL_ANALYSIS_BATCH_SIZE = 40; // Reduced to stay within rate limits
 const PRICE_UPDATE_BATCH_SIZE = 500; // Reduced for safety margin
 
+// Industry backfill = 1 API call per stock (profile endpoint)
+// Keep this conservative to avoid timeouts and stay well below 750/min even with network jitter.
+const INDUSTRY_BACKFILL_BATCH_SIZE = 200;
+const INTER_PROFILE_DELAY_MS = 120;
+
 // Process one batch per invocation, then self-invoke for next batch
 const BATCH_DELAY_MS = 5000; // 5 seconds between self-invocations
 
@@ -24,14 +29,17 @@ interface ContinuationState {
   jobName: string;
   trigger: string;
   forceFullAnalysis: boolean;
+  backfillIndustry?: boolean;
   currentMarketIndex: number;
   markets: string[];
-  currentPhase: 'full_analysis' | 'price_update';
+  currentPhase: 'full_analysis' | 'price_update' | 'industry_backfill';
   batchOffset: number;
   stocksToProcess: string[]; // Symbol list for current phase
+  backfillScanOffset?: number; // Used only for industry_backfill scan-mode
   stats: {
     stocksFullAnalyzed: number;
     stocksPriceUpdated: number;
+    industriesBackfilled: number;
     stocksSkipped: number;
     stocksFailed: number;
     totalApiCalls: number;
@@ -257,8 +265,9 @@ serve(async (req) => {
     // Fresh start - initialize new job
     const trigger = body.trigger || 'manual';
     const forceFullAnalysis = body.forceFullAnalysis === true;
+    const backfillIndustry = body.backfillIndustry === true;
     const customMarkets = Array.isArray(body.markets) && body.markets.length > 0 ? body.markets : null;
-    const jobName = `quant-update-${trigger}-${new Date().toISOString().split('T')[0]}`;
+    const jobName = `${backfillIndustry ? 'industry-backfill' : 'quant-update'}-${trigger}-${new Date().toISOString().split('T')[0]}`;
     
     console.log(`[${jobName}] Starting scheduled quant update...`);
 
@@ -318,7 +327,56 @@ serve(async (req) => {
     const jobId = jobLog?.id || 'unknown';
     const markets = customMarkets || ['NYSE', 'NASDAQ', 'XETRA'];
     
-    console.log(`[${jobName}] Processing markets: ${markets.join(', ')}, forceFullAnalysis: ${forceFullAnalysis}`);
+    console.log(`[${jobName}] Processing markets: ${markets.join(', ')}, forceFullAnalysis: ${forceFullAnalysis}, backfillIndustry: ${backfillIndustry}`);
+
+    // Industry backfill mode: only fill missing sector/industry from FMP profile (1 call/stock)
+    if (backfillIndustry) {
+      // Optional test mode: limit to specific symbols (e.g. { backfillIndustry: true, testSymbols: ["TSM","LULU"] })
+      let testSymbols: string[] = [];
+      if (Array.isArray(body.testSymbols)) testSymbols = body.testSymbols.filter((s: any) => typeof s === 'string');
+      if (typeof body.testSymbol === 'string') testSymbols = [body.testSymbol];
+      testSymbols = Array.from(new Set(testSymbols.map(s => s.trim()).filter(Boolean)));
+
+      const state: ContinuationState = {
+        jobId,
+        jobName,
+        trigger,
+        forceFullAnalysis: false,
+        backfillIndustry: true,
+        currentMarketIndex: 0,
+        markets,
+        currentPhase: 'industry_backfill',
+        batchOffset: 0,
+        stocksToProcess: testSymbols, // if empty, we use scan-mode via backfillScanOffset
+        backfillScanOffset: testSymbols.length > 0 ? undefined : 0,
+        stats: {
+          stocksFullAnalyzed: 0,
+          stocksPriceUpdated: 0,
+          industriesBackfilled: 0,
+          stocksSkipped: 0,
+          stocksFailed: 0,
+          totalApiCalls: 0,
+          marketsProcessed: []
+        }
+      };
+
+      const result = await processOneBatch(state, supabaseClient, FMP_API_KEY);
+      if (result.hasMore) {
+        await scheduleContinuation(result.nextState, supabaseClient);
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: 'Industry backfill started',
+          jobId,
+          jobName,
+          markets,
+          testSymbols: testSymbols.length > 0 ? testSymbols : null
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      );
+    }
 
     // Get stocks for first market and categorize
     const firstMarketStocks = await getAndCategorizeStocks(
@@ -332,19 +390,22 @@ serve(async (req) => {
     const startWithPriceUpdate = firstMarketStocks.priceUpdate.length > 0;
     
     // Initialize continuation state - start with price updates if available
-    const state: ContinuationState = {
+     const state: ContinuationState = {
       jobId,
       jobName,
       trigger,
       forceFullAnalysis,
+       backfillIndustry: false,
       currentMarketIndex: 0,
       markets,
       currentPhase: startWithPriceUpdate ? 'price_update' : 'full_analysis',
       batchOffset: 0,
       stocksToProcess: startWithPriceUpdate ? firstMarketStocks.priceUpdate : firstMarketStocks.fullAnalysis,
+       backfillScanOffset: undefined,
       stats: {
         stocksFullAnalyzed: 0,
         stocksPriceUpdated: 0,
+         industriesBackfilled: 0,
         stocksSkipped: firstMarketStocks.skipped,
         stocksFailed: 0,
         totalApiCalls: firstMarketStocks.fullAnalysis.length > 0 ? 1 : 0, // Only count FMP stock list call if we fetched it
@@ -399,7 +460,8 @@ async function handleContinuation(
   supabaseClient: any,
   FMP_API_KEY: string
 ): Promise<Response> {
-  console.log(`[${state.jobName}] Continuing: market=${state.markets[state.currentMarketIndex]}, phase=${state.currentPhase}, batch=${Math.floor(state.batchOffset / FULL_ANALYSIS_BATCH_SIZE) + 1}`);
+  const scanOffset = typeof state.backfillScanOffset === 'number' ? state.backfillScanOffset : null;
+  console.log(`[${state.jobName}] Continuing: market=${state.markets[state.currentMarketIndex]}, phase=${state.currentPhase}, batchOffset=${state.batchOffset}, scanOffset=${scanOffset}`);
 
   try {
     const result = await processOneBatch(state, supabaseClient, FMP_API_KEY);
@@ -475,6 +537,196 @@ async function processOneBatch(
   FMP_API_KEY: string
 ): Promise<{ hasMore: boolean; nextState: ContinuationState }> {
   const nextState = { ...state, stats: { ...state.stats, marketsProcessed: [...state.stats.marketsProcessed] } };
+
+  // INDUSTRY BACKFILL PHASE (profile-only, fast, fills missing sector/industry)
+  if (state.currentPhase === 'industry_backfill') {
+    const marketId = state.markets[state.currentMarketIndex];
+    const PAGE_SIZE = 1000;
+
+    const isScanMode = typeof state.backfillScanOffset === 'number';
+    const scanOffset = isScanMode ? (state.backfillScanOffset as number) : 0;
+
+    // If scan-mode and queue is empty: fetch one page and seed the queue with missing-industry symbols
+    if (isScanMode && (!state.stocksToProcess || state.stocksToProcess.length === 0)) {
+      const { data: page, error: pageError } = await supabaseClient
+        .from('stock_analysis_cache')
+        .select('symbol, analysis_result')
+        .eq('market_id', marketId)
+        .order('symbol')
+        .range(scanOffset, scanOffset + PAGE_SIZE - 1)
+        .limit(PAGE_SIZE);
+
+      if (pageError) {
+        console.error(`[${state.jobName}] Industry backfill scan fetch failed (${marketId} @ ${scanOffset}):`, pageError);
+        throw new Error(pageError.message || 'Industry backfill scan fetch failed');
+      }
+
+      if (!page || page.length === 0) {
+        // End of table for this market
+        console.log(`[${state.jobName}] Industry backfill scan complete for ${marketId}`);
+        return await moveToNextMarket(nextState, supabaseClient, FMP_API_KEY);
+      }
+
+      const missing = page
+        .filter((r: any) => {
+          const industry = r?.analysis_result?.industry;
+          return !industry || String(industry).trim() === '';
+        })
+        .map((r: any) => r.symbol)
+        .filter(Boolean);
+
+      if (missing.length === 0) {
+        // No work on this page → advance scan cursor
+        nextState.backfillScanOffset = scanOffset + PAGE_SIZE;
+
+        // If this was the last page (returned < PAGE_SIZE), we are done with this market
+        if (page.length < PAGE_SIZE) {
+          console.log(`[${state.jobName}] Industry backfill finished for ${marketId} (no missing industries found on last page)`);
+          return await moveToNextMarket(nextState, supabaseClient, FMP_API_KEY);
+        }
+
+        return { hasMore: true, nextState };
+      }
+
+      // Seed queue for this page; keep scanOffset until queue is fully processed
+      nextState.stocksToProcess = missing;
+      nextState.batchOffset = 0;
+      console.log(`[${state.jobName}] Industry backfill scan: seeded ${missing.length} symbols (market=${marketId}, scanOffset=${scanOffset})`);
+    }
+
+    const queue = nextState.stocksToProcess || [];
+    const batchSymbols = queue.slice(nextState.batchOffset, nextState.batchOffset + INDUSTRY_BACKFILL_BATCH_SIZE);
+
+    if (batchSymbols.length === 0) {
+      // Queue completed
+      if (isScanMode) {
+        nextState.stocksToProcess = [];
+        nextState.batchOffset = 0;
+        nextState.backfillScanOffset = scanOffset + PAGE_SIZE;
+        return { hasMore: true, nextState };
+      }
+
+      // testSymbols mode finished for this market → move to next market
+      return await moveToNextMarket(nextState, supabaseClient, FMP_API_KEY);
+    }
+
+    console.log(`[${state.jobName}] Industry backfill batch: ${batchSymbols.length} stocks (market=${marketId})`);
+
+    // Fetch current analysis_result for this batch so we can merge without losing metrics
+    const { data: existingRows, error: existingError } = await supabaseClient
+      .from('stock_analysis_cache')
+      .select('symbol, analysis_result')
+      .eq('market_id', marketId)
+      .in('symbol', batchSymbols);
+
+    if (existingError) {
+      console.error(`[${state.jobName}] Industry backfill fetch existing failed:`, existingError);
+      throw new Error(existingError.message || 'Industry backfill fetch existing failed');
+    }
+
+    const rowMap = new Map<string, any>();
+    for (const r of existingRows || []) rowMap.set(r.symbol, r.analysis_result || {});
+
+    const updates: any[] = [];
+    for (let i = 0; i < batchSymbols.length; i++) {
+      const symbol = batchSymbols[i];
+      const existing = rowMap.get(symbol) || {};
+
+      // Skip if it was already filled meanwhile
+      if (existing?.industry && String(existing.industry).trim() !== '') continue;
+
+      try {
+        const profileResponse = await fetch(
+          `https://financialmodelingprep.com/api/v3/profile/${symbol}?apikey=${FMP_API_KEY}`
+        );
+        const profileRaw = await profileResponse.json();
+
+        // Rate limiting between profile calls
+        if (i < batchSymbols.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, INTER_PROFILE_DELAY_MS));
+        }
+
+        if (!Array.isArray(profileRaw) || profileRaw.length === 0) {
+          const errorMsg = profileRaw?.['Error Message'] || profileRaw?.message || 'Invalid profile response';
+          console.warn(`[${state.jobName}] Profile fetch failed for ${symbol}: ${errorMsg}`);
+          nextState.stats.stocksFailed++;
+
+          // If rate limit, cool down (keep going afterwards)
+          if (String(errorMsg).includes('Limit Reach') || String(errorMsg).toLowerCase().includes('rate limit')) {
+            console.log(`[${state.jobName}] Rate limit hit during industry backfill, waiting 60 seconds...`);
+            await new Promise(resolve => setTimeout(resolve, 60000));
+          }
+          continue;
+        }
+
+        const p = profileRaw[0] || {};
+        const industry = p.industry || null;
+        const sector = p.sector || null;
+
+        // Only count as success if we actually got an industry
+        if (!industry || String(industry).trim() === '') {
+          nextState.stats.stocksFailed++;
+          continue;
+        }
+
+        updates.push({
+          symbol,
+          market_id: marketId,
+          analysis_result: {
+            ...existing,
+            name: p.companyName ?? existing.name,
+            sector: sector ?? existing.sector,
+            industry: industry ?? existing.industry,
+            currency: p.currency ?? existing.currency,
+          },
+          last_updated: new Date().toISOString(),
+        });
+
+        nextState.stats.industriesBackfilled++;
+        nextState.stats.totalApiCalls += 1;
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.warn(`[${state.jobName}] Industry backfill error for ${symbol}: ${errorMsg}`);
+        nextState.stats.stocksFailed++;
+
+        if (errorMsg.includes('Limit Reach') || errorMsg.toLowerCase().includes('rate limit')) {
+          console.log(`[${state.jobName}] Rate limit hit during industry backfill, waiting 60 seconds...`);
+          await new Promise(resolve => setTimeout(resolve, 60000));
+        }
+      }
+    }
+
+    if (updates.length > 0) {
+      const { error: upsertError } = await supabaseClient
+        .from('stock_analysis_cache')
+        .upsert(updates, { onConflict: 'symbol,market_id' });
+
+      if (upsertError) {
+        console.error(`[${state.jobName}] Industry backfill upsert failed:`, upsertError);
+        nextState.stats.stocksFailed += updates.length;
+      }
+    }
+
+    // Advance within current queue
+    nextState.batchOffset = nextState.batchOffset + batchSymbols.length;
+    await updateJobProgress(state.jobId, nextState.stats, supabaseClient);
+
+    // If queue still has work, continue
+    if (nextState.batchOffset < (nextState.stocksToProcess?.length || 0)) {
+      return { hasMore: true, nextState };
+    }
+
+    // Queue done
+    if (isScanMode) {
+      nextState.stocksToProcess = [];
+      nextState.batchOffset = 0;
+      nextState.backfillScanOffset = scanOffset + PAGE_SIZE;
+      return { hasMore: true, nextState };
+    }
+
+    // testSymbols mode: move on
+    return await moveToNextMarket(nextState, supabaseClient, FMP_API_KEY);
+  }
   
   // PRICE UPDATE PHASE FIRST (fast, keeps existing data current)
   if (state.currentPhase === 'price_update') {
@@ -602,6 +854,24 @@ async function moveToNextMarket(
   // Get stocks for next market
   const nextMarket = state.markets[nextState.currentMarketIndex];
   console.log(`[${state.jobName}] Moving to market: ${nextMarket}`);
+
+  // Industry backfill mode: reset scan cursor and start backfill for next market
+  if (state.backfillIndustry) {
+    nextState.currentPhase = 'industry_backfill';
+    nextState.batchOffset = 0;
+
+    // Scan-mode: keep cursor; Test-symbols mode: keep the provided symbol list.
+    if (typeof state.backfillScanOffset === 'number') {
+      nextState.backfillScanOffset = 0;
+      nextState.stocksToProcess = [];
+    } else {
+      nextState.backfillScanOffset = undefined;
+      nextState.stocksToProcess = state.stocksToProcess || [];
+    }
+
+    console.log(`[${state.jobName}] ${nextMarket}: starting industry_backfill (scanMode=${typeof nextState.backfillScanOffset === 'number'})`);
+    return { hasMore: true, nextState };
+  }
   
   const marketStocks = await getAndCategorizeStocks(
     nextMarket, state.jobName, state.trigger, supabaseClient, FMP_API_KEY, state.forceFullAnalysis
