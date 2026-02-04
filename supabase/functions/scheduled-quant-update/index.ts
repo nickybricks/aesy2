@@ -362,7 +362,7 @@ serve(async (req) => {
 
       const result = await processOneBatch(state, supabaseClient, FMP_API_KEY);
       if (result.hasMore) {
-        await scheduleContinuation(result.nextState, supabaseClient);
+        scheduleContinuation(result.nextState);
       }
 
       return new Response(
@@ -430,8 +430,8 @@ serve(async (req) => {
     const result = await processOneBatch(state, supabaseClient, FMP_API_KEY);
 
     if (result.hasMore) {
-      // Schedule self-invocation for next batch
-      await scheduleContinuation(result.nextState, supabaseClient);
+      // Schedule self-invocation for next batch (do not block current request)
+      scheduleContinuation(result.nextState);
     }
 
     return new Response(
@@ -467,8 +467,8 @@ async function handleContinuation(
     const result = await processOneBatch(state, supabaseClient, FMP_API_KEY);
 
     if (result.hasMore) {
-      // Schedule next batch
-      await scheduleContinuation(result.nextState, supabaseClient);
+      // Schedule next batch (do not block current request)
+      scheduleContinuation(result.nextState);
       
       return new Response(
         JSON.stringify({
@@ -630,6 +630,13 @@ async function processOneBatch(
     const updates: any[] = [];
     for (let i = 0; i < batchSymbols.length; i++) {
       const symbol = batchSymbols[i];
+      // IMPORTANT: Never create new cache rows in backfill mode.
+      // Only enrich rows that already exist for this market.
+      if (!rowMap.has(symbol)) {
+        nextState.stats.stocksSkipped++;
+        continue;
+      }
+
       const existing = rowMap.get(symbol) || {};
 
       // Skip if it was already filled meanwhile
@@ -913,29 +920,43 @@ async function moveToNextMarket(
   return { hasMore: true, nextState };
 }
 
-async function scheduleContinuation(state: ContinuationState, supabaseClient: any) {
+async function scheduleContinuation(state: ContinuationState) {
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  const apiKey = anonKey || serviceRoleKey;
 
-  // Use setTimeout equivalent via fetch with delay
-  // Actually, we invoke immediately - the delay is just for rate limiting
-  await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
+  const task = (async () => {
+    // Delay *after* response handling to avoid client disconnect / "Http: connection closed"
+    await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
 
-  try {
-    const response = await fetch(`${supabaseUrl}/functions/v1/scheduled-quant-update`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${serviceRoleKey}`
-      },
-      body: JSON.stringify({ continuation: state })
-    });
+    try {
+      const response = await fetch(`${supabaseUrl}/functions/v1/scheduled-quant-update`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // verify_jwt is false, but the gateway still expects valid function API access headers.
+          'apikey': apiKey,
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ continuation: state })
+      });
 
-    if (!response.ok) {
-      console.error(`[${state.jobName}] Self-invoke failed:`, await response.text());
+      const text = await response.text();
+      if (!response.ok) {
+        console.error(`[${state.jobName}] Self-invoke failed (status=${response.status}):`, text);
+      }
+    } catch (error) {
+      console.error(`[${state.jobName}] Self-invoke error:`, error);
     }
-  } catch (error) {
-    console.error(`[${state.jobName}] Self-invoke error:`, error);
+  })();
+
+  const waitUntil = (globalThis as any)?.EdgeRuntime?.waitUntil;
+  if (typeof waitUntil === 'function') {
+    waitUntil(task);
+  } else {
+    // Fallback: run asynchronously (may not survive teardown, but better than blocking response)
+    task.catch(() => {});
   }
 }
 
