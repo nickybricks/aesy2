@@ -14,7 +14,7 @@ const LoadingProgressCircle: React.FC<LoadingProgressCircleProps> = ({
 }) => {
   const [progress, setProgress] = useState(0);
   const [showComplete, setShowComplete] = useState(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Duration: ~5 seconds for normal, ~90 seconds for deep research
   const totalDuration = isDeepResearch ? 90000 : 5000;
