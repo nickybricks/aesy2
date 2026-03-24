@@ -57,6 +57,17 @@ export function SectorIndustryFilter({
     return result;
   }, [sectorIndustryMap, search]);
 
+  // Group sectors by super-sector
+  const groupedBySuperSector = useMemo(() => {
+    const groups = new Map<string, Map<string, string[]>>();
+    filteredMap.forEach((industries, sector) => {
+      const ss = getSuperSector(sector);
+      if (!groups.has(ss)) groups.set(ss, new Map());
+      groups.get(ss)!.set(sector, industries);
+    });
+    return groups;
+  }, [filteredMap]);
+
   // Close on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
