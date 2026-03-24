@@ -1,109 +1,53 @@
 
-## Plan: Preis-Update Funktion reparieren
 
-### Problemanalyse
+## Plan: Hierarchical Sector/Industry Multi-Select Filter
 
-Nach ausführlicher Untersuchung habe ich folgende Probleme identifiziert:
+### What changes
 
-1. **Doppelter API-Call im Test-Modus:** Der Test holt zuerst Quotes von FMP (für Logging), dann ruft `performBatchPriceUpdate` die API **erneut** auf. Wenn das FMP API-Limit erreicht ist, gibt der zweite Call ein Fehler-Objekt zurück und die `Array.isArray(quotes)` Prüfung schlägt fehl - das Update wird komplett übersprungen.
+Replace the two separate "Sektor" and "Industrie" single-select dropdowns with one combined hierarchical multi-select dropdown component, matching the reference screenshots.
 
-2. **Fehlendes Logging in `performBatchPriceUpdate`:** Es gibt keine Logs für:
-   - Was die FMP API tatsächlich zurückgibt
-   - Ob `existing` gefunden wurde
-   - Ob das Update erfolgreich war oder fehlgeschlagen ist
-   - Eventueller `updateError`
+### 1. Create `SectorIndustryFilter` component
 
-3. **API-Limit Problem:** Bei den Batch-Jobs sehe ich in den Logs immer wieder "Self-invoke failed" und "Http: connection closed" - das deutet auf API-Limits oder Timeouts hin.
+New file: `src/components/ui/sector-industry-filter.tsx`
 
-### Lösung
+A dropdown component with:
+- **Trigger button** showing "Sektor / Industrie" label and a summary (e.g. "3 ausgewählt" or "Alle")
+- **Dropdown panel** (absolute positioned, z-50) containing:
+  - **Header row**: "Auswahl anzeigen" | "Auswahl löschen" links + close X button
+  - **Search input**: filters the tree by sector/industry name
+  - **Checkbox tree**: Sectors as parent nodes (collapsible with ▶/▼), Industries as children
+    - Checking a sector checks all its industries
+    - Unchecking all industries in a sector unchecks the sector
+    - Partial selection shows indeterminate state
+  - "Alle" checkbox at top to select/deselect all
 
-#### Schritt 1: Besseres Logging hinzufügen
+**Sector-to-Industry mapping**: Built dynamically from `cachedStocks` data by grouping each stock's `industry` under its `sector`. This avoids hardcoding and works with whatever data is in the cache.
 
-In `performBatchPriceUpdate` muss Logging hinzugefügt werden:
-
+Props:
 ```typescript
-async function performBatchPriceUpdate(...) {
-  console.log(`[Price Update] Fetching quotes for ${symbols.length} symbols`);
-  
-  const quotes = await quoteResponse.json();
-  
-  // Log what FMP returned
-  if (!Array.isArray(quotes)) {
-    console.error(`[Price Update] FMP returned non-array:`, JSON.stringify(quotes));
-    return 0;
-  }
-  
-  console.log(`[Price Update] Got ${quotes.length} quotes from FMP`);
-  
-  for (const quote of quotes) {
-    // ... existing code ...
-    
-    if (!existing?.analysis_result) {
-      console.warn(`[Price Update] No cache entry found for ${quote.symbol} in ${marketId}`);
-      continue;
-    }
-    
-    // ... update code ...
-    
-    if (updateError) {
-      console.error(`[Price Update] Update failed for ${quote.symbol}:`, updateError);
-    } else {
-      console.log(`[Price Update] Updated ${quote.symbol}: $${quote.price}`);
-      updated++;
-    }
-  }
-  
-  return updated;
+interface SectorIndustryFilterProps {
+  sectorIndustryMap: Map<string, string[]>; // sector → industries
+  selectedIndustries: Set<string>;
+  onSelectionChange: (industries: Set<string>) => void;
 }
 ```
 
-#### Schritt 2: Test-Modus Quote-Daten wiederverwenden
+### 2. Update `ScreenerMode.tsx` filter state
 
-Im Test-Modus die bereits geholten Quotes an `performBatchPriceUpdate` übergeben oder die Quote-Daten direkt inline verarbeiten:
+- Remove `sector: 'all'` and `industry: 'all'` from filter state
+- Add `selectedIndustries: Set<string>` (empty = all selected / no filter)
+- Build `sectorIndustryMap` via `useMemo` grouping `cachedStocks` by sector→industry
+- Replace the two separate `<Select>` blocks (Sektor + Industrie) with single `<SectorIndustryFilter>`
+- Update filter logic: if `selectedIndustries` is non-empty, only show stocks whose `industry` is in the set
 
-```typescript
-// Option A: Quote direkt nutzen (schneller, kein doppelter API-Call)
-if (body.testSymbol) {
-  // ... fetch quote ...
-  
-  // Direkt updaten ohne performBatchPriceUpdate aufzurufen
-  const result = await updateSingleStockPrice(symbol, fmpQuote[0], supabaseClient);
-}
-```
-
-#### Schritt 3: API-Limit-Fehler erkennen und handhaben
+### 3. Filter logic update
 
 ```typescript
-const quotes = await quoteResponse.json();
-
-// Check for FMP error response
-if (quotes && typeof quotes === 'object' && 'Error Message' in quotes) {
-  console.error(`[Price Update] FMP API error:`, quotes['Error Message']);
-  return 0;
-}
+// Replace sector + industry filter lines with:
+if (selectedIndustries.size > 0 && !selectedIndustries.has(stock.industry)) return false;
 ```
 
-#### Schritt 4: Update-Statement korrigieren
-
-Das Update sollte auch `market_id` verwenden für eindeutige Identifizierung:
-
-```typescript
-.eq('symbol', quote.symbol)
-.eq('market_id', actualMarketId)  // HINZUFÜGEN
-```
-
-### Dateien die geändert werden
-
-| Datei | Änderungen |
-|-------|------------|
-| `supabase/functions/scheduled-quant-update/index.ts` | Logging, API-Error-Handling, Update-Statement Fix |
-
-### Erwartetes Ergebnis
-
-Nach der Implementierung:
-1. Logs zeigen genau warum Updates fehlschlagen
-2. Test-Modus macht nur 1 API-Call statt 2
-3. API-Limit-Fehler werden erkannt und protokolliert
-4. Updates werden mit korrektem `market_id` Constraint ausgeführt
-5. Preise werden zuverlässig aktualisiert bei jedem Cron-Job
+### Files affected
+- **New**: `src/components/ui/sector-industry-filter.tsx`
+- **Edit**: `src/components/ScreenerMode.tsx` (remove 2 selects, add new component, update state + filter logic)
 
