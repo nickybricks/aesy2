@@ -3,6 +3,22 @@ import { ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLanguage } from '@/context/LanguageContext';
 
+// Morningstar-style super-sector grouping
+const SUPER_SECTORS: Record<string, string[]> = {
+  Cyclical: ['Basic Materials', 'Consumer Cyclical', 'Financial Services', 'Real Estate'],
+  Defensive: ['Consumer Defensive', 'Healthcare', 'Utilities'],
+  Sensitive: ['Communication Services', 'Energy', 'Industrials', 'Technology'],
+};
+
+const getSuperSector = (sector: string): string => {
+  for (const [superSector, sectors] of Object.entries(SUPER_SECTORS)) {
+    if (sectors.includes(sector)) return superSector;
+  }
+  return 'Other';
+};
+
+const SUPER_SECTOR_ORDER = ['Cyclical', 'Defensive', 'Sensitive', 'Other'];
+
 interface SectorIndustryFilterProps {
   sectorIndustryMap: Map<string, string[]>;
   selectedIndustries: Set<string>;
