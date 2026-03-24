@@ -218,68 +218,123 @@ export function SectorIndustryFilter({
             </div>
           </div>
 
-          {/* Tree */}
+          {/* Tree grouped by super-sector */}
           <div className="overflow-y-auto flex-1 py-1">
-            {Array.from(filteredMap.entries())
-              .sort(([a], [b]) => a.localeCompare(b))
-              .map(([sector, industries]) => {
-                const expanded = expandedSectors.has(sector) || search.trim().length > 0;
-                const state = getSectorState(sector);
+            {/* All checkbox */}
+            <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-accent/50 cursor-pointer text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={selectedIndustries.size === allIndustries.size && allIndustries.size > 0}
+                ref={(el) => {
+                  if (el) el.indeterminate = selectedIndustries.size > 0 && selectedIndustries.size < allIndustries.size;
+                }}
+                onChange={toggleAll}
+                className="h-4 w-4 rounded border-input accent-primary"
+              />
+              <span>{language === 'de' ? 'Alle' : 'All'}</span>
+            </label>
+
+            {SUPER_SECTOR_ORDER
+              .filter((ss) => groupedBySuperSector.has(ss))
+              .map((superSector) => {
+                const sectorsInGroup = groupedBySuperSector.get(superSector)!;
+                const ssExpanded = expandedSectors.has(`ss:${superSector}`) || search.trim().length > 0;
+                const ssState = getSuperSectorState(superSector);
 
                 return (
-                  <div key={sector}>
-                    {/* Sector row */}
+                  <div key={superSector}>
+                    {/* Super-sector row */}
                     <div className="flex items-center gap-1 px-3 py-1.5 hover:bg-accent/50 cursor-pointer">
                       <button
                         type="button"
-                        onClick={() => toggleSectorExpand(sector)}
+                        onClick={() => toggleSectorExpand(`ss:${superSector}`)}
                         className="shrink-0 p-0.5"
                       >
-                        {expanded ? (
+                        {ssExpanded ? (
                           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                         ) : (
                           <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
                         )}
                       </button>
-                      <label className="flex items-center gap-2 flex-1 cursor-pointer text-sm font-medium">
+                      <label className="flex items-center gap-2 flex-1 cursor-pointer text-sm font-semibold">
                         <input
                           type="checkbox"
-                          checked={state === 'all'}
+                          checked={ssState === 'all'}
                           ref={(el) => {
-                            if (el) el.indeterminate = state === 'some';
+                            if (el) el.indeterminate = ssState === 'some';
                           }}
-                          onChange={() => toggleSector(sector)}
+                          onChange={() => toggleSuperSector(superSector)}
                           className="h-4 w-4 rounded border-input accent-primary"
                         />
-                        <span className="truncate">{sector}</span>
-                        <span className="text-xs text-muted-foreground ml-auto shrink-0">
-                          ({industries.length})
-                        </span>
+                        <span>{superSector}</span>
                       </label>
                     </div>
 
-                    {/* Industries */}
-                    {expanded &&
-                      industries
-                        .sort((a, b) => a.localeCompare(b))
-                        .map((industry) => (
-                          <label
-                            key={industry}
-                            className="flex items-center gap-2 px-3 pl-10 py-1 hover:bg-accent/50 cursor-pointer text-sm"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selectedIndustries.has(industry)}
-                              onChange={() => toggleIndustry(industry)}
-                              className="h-4 w-4 rounded border-input accent-primary"
-                            />
-                            <span className="truncate">{industry}</span>
-                          </label>
-                        ))}
+                    {ssExpanded &&
+                      Array.from(sectorsInGroup.entries())
+                        .sort(([a], [b]) => a.localeCompare(b))
+                        .map(([sector, industries]) => {
+                          const sectorExpanded = expandedSectors.has(sector) || search.trim().length > 0;
+                          const state = getSectorState(sector);
+
+                          return (
+                            <div key={sector}>
+                              {/* Sector row */}
+                              <div className="flex items-center gap-1 px-3 pl-7 py-1.5 hover:bg-accent/50 cursor-pointer">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleSectorExpand(sector)}
+                                  className="shrink-0 p-0.5"
+                                >
+                                  {sectorExpanded ? (
+                                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                                  ) : (
+                                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                                  )}
+                                </button>
+                                <label className="flex items-center gap-2 flex-1 cursor-pointer text-sm font-medium">
+                                  <input
+                                    type="checkbox"
+                                    checked={state === 'all'}
+                                    ref={(el) => {
+                                      if (el) el.indeterminate = state === 'some';
+                                    }}
+                                    onChange={() => toggleSector(sector)}
+                                    className="h-4 w-4 rounded border-input accent-primary"
+                                  />
+                                  <span className="truncate">{sector}</span>
+                                  <span className="text-xs text-muted-foreground ml-auto shrink-0">
+                                    ({industries.length})
+                                  </span>
+                                </label>
+                              </div>
+
+                              {/* Industries */}
+                              {sectorExpanded &&
+                                industries
+                                  .sort((a, b) => a.localeCompare(b))
+                                  .map((industry) => (
+                                    <label
+                                      key={industry}
+                                      className="flex items-center gap-2 px-3 pl-14 py-1 hover:bg-accent/50 cursor-pointer text-sm"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedIndustries.has(industry)}
+                                        onChange={() => toggleIndustry(industry)}
+                                        className="h-4 w-4 rounded border-input accent-primary"
+                                      />
+                                      <span className="truncate">{industry}</span>
+                                    </label>
+                                  ))}
+                            </div>
+                          );
+                        })}
                   </div>
                 );
               })}
-            {filteredMap.size === 0 && (
+
+            {groupedBySuperSector.size === 0 && (
               <p className="text-sm text-muted-foreground text-center py-4">
                 {language === 'de' ? 'Keine Ergebnisse' : 'No results'}
               </p>
