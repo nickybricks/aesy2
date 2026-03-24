@@ -113,6 +113,31 @@ export function SectorIndustryFilter({
 
   const clearSelection = () => onSelectionChange(new Set());
 
+  const toggleSuperSector = (superSector: string) => {
+    const sectors = SUPER_SECTORS[superSector] || [];
+    const allInds: string[] = [];
+    sectors.forEach((s) => (sectorIndustryMap.get(s) || []).forEach((i) => allInds.push(i)));
+    const allSelected = allInds.length > 0 && allInds.every((i) => selectedIndustries.has(i));
+    const next = new Set(selectedIndustries);
+    if (allSelected) {
+      allInds.forEach((i) => next.delete(i));
+    } else {
+      allInds.forEach((i) => next.add(i));
+    }
+    onSelectionChange(next);
+  };
+
+  const getSuperSectorState = (superSector: string): 'all' | 'some' | 'none' => {
+    const sectors = SUPER_SECTORS[superSector] || [];
+    const allInds: string[] = [];
+    sectors.forEach((s) => (sectorIndustryMap.get(s) || []).forEach((i) => allInds.push(i)));
+    if (allInds.length === 0) return 'none';
+    const count = allInds.filter((i) => selectedIndustries.has(i)).length;
+    if (count === 0) return 'none';
+    if (count === allInds.length) return 'all';
+    return 'some';
+  };
+
   const getSectorState = (sector: string): 'all' | 'some' | 'none' => {
     const industries = sectorIndustryMap.get(sector) || [];
     if (industries.length === 0) return 'none';
