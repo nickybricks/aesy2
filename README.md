@@ -1,69 +1,96 @@
-# Welcome to your Lovable project
+# Aesy — Quantitative Stock Analyzer
 
-## Project info
+Aesy is a web application for fundamental and quantitative stock analysis,
+inspired by the investment principles of Warren Buffett and Peter Lynch.
+It scores publicly listed companies on quality, growth, financial strength
+and valuation, and lets users screen the global stock universe through a
+rich filter interface.
 
-**URL**: https://lovable.dev/projects/d949b9a9-b92f-497d-aeeb-d6d929d6984d
+- **Live app:** https://aesy2.lovable.app
+- **Lovable project:** https://lovable.dev/projects/d949b9a9-b92f-497d-aeeb-d6d929d6984d
 
-## How can I edit this code?
+## Features
 
-There are several ways of editing your application.
+- **Buffett-style scoring** — proprietary "Aesy Score" (0–14) computed from
+  profitability, growth, debt and valuation criteria.
+- **Quant screener** (`/quant`) — filter thousands of stocks by Aesy Score,
+  P/E, ROIC, ROE, dividend yield, EPS / revenue growth (3y / 5y / 10y),
+  margins, leverage and more.
+- **Hierarchical sector / industry filter** — multi-select tree grouped into
+  Cyclical, Defensive and Sensitive super-sectors.
+- **Detailed single-stock analysis** — DCF valuation, margin of safety,
+  Peter Lynch chart, predictability stars, qualitative analysis, news.
+- **Watchlists & portfolios** — save and track companies per user.
+- **Internationalization** — German and English, auto-detected from the
+  browser locale.
+- **Admin dashboard** — cron job overview, cache management, scheduled
+  data updates.
+- **Mobile-first responsive UI** with light/dark themes.
 
-**Use Lovable**
+## Tech Stack
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/d949b9a9-b92f-497d-aeeb-d6d929d6984d) and start prompting.
+- **Frontend:** React 18, TypeScript, Vite 5, Tailwind CSS, shadcn/ui,
+  Radix UI, TanStack Query, React Router, Recharts, Framer Motion.
+- **Backend (Lovable Cloud / Supabase):** Postgres with Row-Level Security,
+  Supabase Auth, Edge Functions (Deno) for data ingestion, scoring and
+  scheduled updates.
+- **External data:** Financial Modeling Prep (FMP) API for fundamentals,
+  prices and company profiles; OpenAI / Perplexity for qualitative
+  analysis and news.
 
-Changes made via Lovable will be committed automatically to this repo.
+## Project Structure
 
-**Use your preferred IDE**
+```text
+src/
+  api/             FMP & cached quant analyzer client code
+  components/      UI, metrics cards, screener, charts
+  components/ui/   shadcn/ui primitives + custom filters
+  context/         Auth, language, stock data, currency
+  hooks/           React hooks (auth, watchlists, analytics, ...)
+  i18n/            German + English translations
+  pages/           Route-level pages (LandingPage, BuffettQuantAnalyzer, ...)
+  services/        Domain services (DCF, valuation, scoring)
+  utils/           Helpers (currency, country mapping, WACC, ...)
+supabase/
+  functions/       Edge functions (scoring, scheduled updates, news, ...)
+  migrations/      SQL schema migrations
+```
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+## Getting Started (local development)
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+Requires Node.js 20+ and npm (or bun).
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
 git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
 cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+npm install
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+The app runs on http://localhost:8080. Backend (database + edge functions)
+is provided by Lovable Cloud and requires no local setup — credentials are
+already wired through `src/integrations/supabase/client.ts`.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### Available scripts
 
-**Use GitHub Codespaces**
+- `npm run dev` — start the Vite dev server.
+- `npm run build` — production build.
+- `npm run build:dev` — development-mode build.
+- `npm run preview` — preview the production build.
+- `npm run lint` — run ESLint.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Editing the Code
 
-## What technologies are used for this project?
+- **Lovable** — open the [Lovable project](https://lovable.dev/projects/d949b9a9-b92f-497d-aeeb-d6d929d6984d)
+  and prompt; changes are committed automatically.
+- **Local IDE** — clone the repo, push commits; changes sync to Lovable.
+- **GitHub web editor / Codespaces** — also fully supported.
 
-This project is built with .
+## Deployment
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+Open the Lovable project and click **Share → Publish**. Custom domains can
+be configured under **Project → Settings → Domains**.
 
-## How can I deploy this project?
+## License
 
-Simply open [Lovable](https://lovable.dev/projects/d949b9a9-b92f-497d-aeeb-d6d929d6984d) and click on Share -> Publish.
-
-## I want to use a custom domain - is that possible?
-
-We don't support custom domains (yet). If you want to deploy your project under your own domain then we recommend using Netlify. Visit our docs for more details: [Custom domains](https://docs.lovable.dev/tips-tricks/custom-domain/)
+Proprietary. All rights reserved.
