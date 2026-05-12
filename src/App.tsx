@@ -29,6 +29,7 @@ const App = () => {
   const AppContent = () => {
     const location = useLocation();
     const isAuthPage = location.pathname === "/auth";
+    const isLandingPage = location.pathname === "/";
     
     // Initialize analytics and track page views
     useAnalytics();
@@ -36,22 +37,22 @@ const App = () => {
     return (
       <div className="min-h-screen bg-background flex flex-col w-full">
         {/* App Header - Fixed at top */}
-        {!isAuthPage && <AppHeader />}
+        {!isAuthPage && !isLandingPage && <AppHeader />}
 
         {/* Main content area */}
         <main className={`
-          ${!isAuthPage ? 'pt-18' : ''}
+          ${!isAuthPage && !isLandingPage ? 'pt-18' : ''}
           min-h-screen flex-1 w-full
         `}>
           {/* Impersonation Banner */}
-          {!isAuthPage && (
+          {!isAuthPage && !isLandingPage && (
             <div className="px-4 pt-4">
               <ImpersonationBanner />
             </div>
           )}
           
           <Routes>
-            <Route path="/" element={<BuffettAnalyzer />} />
+            <Route path="/" element={<Index />} />
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/analyzer" element={<BuffettAnalyzer />} />
             <Route path="/quant" element={<BuffettQuantAnalyzer />} />
